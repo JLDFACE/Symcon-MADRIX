@@ -1,0 +1,17 @@
+{
+  "id": "{A0B7D7E1-5A27-4E77-9C7F-8D7B5A0C1E01}",
+  "name": "MADRIX Controller",
+  "type": 2,
+  "vendor": "FACE GmbH",
+  "aliases": [
+    "MADRIX Controller (Remote HTTP)"
+  ],
+  "parentRequirements": [],
+  "childRequirements": [
+    "{E1B4B2E6-9D1C-4D5E-9C8B-0D3B1A2C3D41}"
+  ],
+  "implemented": [
+    "{E1B4B2E6-9D1C-4D5E-9C8B-0D3B1A2C3D41}"
+  ],
+  "prefix": "MADRIX"
+}

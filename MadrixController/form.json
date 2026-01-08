@@ -1,0 +1,77 @@
+{
+  "elements": [
+    {
+      "type": "ValidationTextBox",
+      "name": "Host",
+      "caption": "Host / IP"
+    },
+    {
+      "type": "NumberSpinner",
+      "name": "Port",
+      "caption": "Port",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    {
+      "type": "ValidationTextBox",
+      "name": "Username",
+      "caption": "Username (optional, Basic Auth)"
+    },
+    {
+      "type": "PasswordTextBox",
+      "name": "Password",
+      "caption": "Password (optional, Basic Auth)"
+    },
+    {
+      "type": "ExpansionPanel",
+      "caption": "Polling / Performance",
+      "items": [
+        {
+          "type": "NumberSpinner",
+          "name": "PollSlow",
+          "caption": "PollSlow (Sek.)",
+          "minimum": 5,
+          "maximum": 3600
+        },
+        {
+          "type": "NumberSpinner",
+          "name": "PollFast",
+          "caption": "PollFast (Sek.)",
+          "minimum": 2,
+          "maximum": 60
+        },
+        {
+          "type": "NumberSpinner",
+          "name": "FastAfterChange",
+          "caption": "FastAfterChange (Sek.)",
+          "minimum": 0,
+          "maximum": 300
+        },
+        {
+          "type": "NumberSpinner",
+          "name": "PendingTimeout",
+          "caption": "Pending-Timeout (Sek.)",
+          "minimum": 2,
+          "maximum": 60
+        }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "type": "Button",
+      "caption": "Jetzt poll(en)",
+      "onClick": "MADRIX_Poll($_IPS['TARGET']);"
+    },
+    {
+      "type": "Button",
+      "caption": "Devices neu anlegen/prüfen",
+      "onClick": "MADRIX_EnsureDevices($_IPS['TARGET']);"
+    },
+    {
+      "type": "Button",
+      "caption": "Sync Names (Groups/Places) erzwingen",
+      "onClick": "MADRIX_ForceNameSync($_IPS['TARGET']);"
+    }
+  ]
+}

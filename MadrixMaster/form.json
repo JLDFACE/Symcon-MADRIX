@@ -1,0 +1,37 @@
+{
+  "elements": [
+    {
+      "type": "Label",
+      "caption": "Global Colors: Pro Eintrag wird eine Farbvariable (~HexColor) angelegt."
+    },
+    {
+      "type": "List",
+      "name": "GlobalColors",
+      "caption": "Global Colors",
+      "add": true,
+      "delete": true,
+      "columns": [
+        {
+          "caption": "Name",
+          "name": "Name",
+          "width": "250px",
+          "add": "Color 1"
+        },
+        {
+          "caption": "GlobalColorId",
+          "name": "GlobalColorId",
+          "width": "140px",
+          "add": 1
+        }
+      ],
+      "values": []
+    }
+  ],
+  "actions": [
+    {
+      "type": "Button",
+      "caption": "Variablen synchronisieren (Colors anlegen/benennen)",
+      "onClick": "MADRIX_SyncLocal($_IPS['TARGET']);"
+    }
+  ]
+}

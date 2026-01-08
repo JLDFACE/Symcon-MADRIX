@@ -1,0 +1,12 @@
+{
+  "id": "{5C2B2C93-4F8C-4F20-A6F4-3F2B3D4E5F61}",
+  "author": "FACE GmbH",
+  "name": "FACE MADRIX",
+  "url": "https://github.com/JLDFACE/Symcon-MADRIX",
+  "compatibility": {
+    "version": "6.0"
+  },
+  "version": "1.0.0",
+  "build": 100,
+  "date": 20260108
+}
