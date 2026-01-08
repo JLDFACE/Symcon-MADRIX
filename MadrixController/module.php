@@ -45,8 +45,11 @@ class MadrixController extends IPSModule
         // Name sync Steuerung
         $this->SetBuffer('ForceNameSync', '0'); // 1 => beim nächsten Poll Descriptions/Names holen
 
+        // Eigene Profile anlegen (robust, keine Abhängigkeit von Systemprofilen)
+        $this->EnsureProfiles();
+
         // Diagnose
-        $this->RegisterVariableBoolean('Online', 'Online', '~Online', 1);
+        $this->RegisterVariableBoolean('Online', 'Online', 'MADRIX.Online', 1);
         $this->RegisterVariableString('LastError', 'LastError', '', 2);
     }
 
@@ -54,9 +57,20 @@ class MadrixController extends IPSModule
     {
         parent::ApplyChanges();
 
+        $this->EnsureProfiles();
         $this->EnsureDevices();
         $this->UpdatePollInterval(false);
         $this->SetFastPollForSeconds(5);
+    }
+
+    private function EnsureProfiles()
+    {
+        if (!IPS_VariableProfileExists('MADRIX.Online')) {
+            IPS_CreateVariableProfile('MADRIX.Online', 0);
+            // 0/1 Boolean, Beschriftung ist optional; Symcon zeigt i.d.R. den Status ohnehin klar an
+            IPS_SetVariableProfileAssociation('MADRIX.Online', 0, 'Offline', '', 0);
+            IPS_SetVariableProfileAssociation('MADRIX.Online', 1, 'Online', '', 0);
+        }
     }
 
     public function EnsureDevices()
@@ -387,7 +401,6 @@ class MadrixController extends IPSModule
             if (!$ok) $val = 0;
 
             $this->ResolvePendingIfReached('Group_' . $gid, $val, 0);
-
             $result[] = array('id' => $gid, 'name' => $name, 'val' => $val);
         }
 
@@ -419,7 +432,6 @@ class MadrixController extends IPSModule
             if (!$ok) $val = 0;
 
             $this->ResolvePendingIfReached('Group_' . $gid, $val, 0);
-
             $result[] = array('id' => $gid, 'name' => $name, 'val' => $val);
         }
 
