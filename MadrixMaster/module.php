@@ -8,6 +8,7 @@ class MadrixMaster extends IPSModule
     {
         parent::Create();
 
+        // Konfig: bis zu 20 Global Colors
         $this->RegisterPropertyString('GlobalColors', '[]');
 
         $this->RegisterAttributeInteger('CatGroups', 0);
@@ -24,17 +25,13 @@ class MadrixMaster extends IPSModule
         $this->EnsureCategories();
         $this->EnsureBaseVariables();
 
-        $this->SyncLocal();
-    }
-
-    public function SyncLocal()
-    {
-        $this->EnsureCategories();
+        // Aus Konfiguration die Global-Color Variablen erzeugen
         $this->SyncColorVariablesFromConfig();
     }
 
     public function RequestAction($Ident, $Value)
     {
+        // Master
         if ($Ident == 'Master') {
             $v = (int)$Value;
             if ($v < 0) $v = 0;
@@ -47,8 +44,10 @@ class MadrixMaster extends IPSModule
             return;
         }
 
+        // Blackout
         if ($Ident == 'Blackout') {
             $b = ((bool)$Value) ? 1 : 0;
+
             $this->SetValue('Blackout', (bool)$Value);
             $this->SetPending($Ident, $b);
 
@@ -56,31 +55,27 @@ class MadrixMaster extends IPSModule
             return;
         }
 
+        // Group Intensity
         if (substr($Ident, 0, 6) == 'Group_') {
             $gid = (int)substr($Ident, 6);
             $v = (int)$Value;
             if ($v < 0) $v = 0;
             if ($v > 255) $v = 255;
 
-            $vid = $this->GetObjectIDByIdentRecursive($Ident);
-            if ($vid > 0) {
-                $this->SetVarValueIfChanged($vid, $v);
-            }
-
+            // Variable ist eine echte Modulvariable => SetValue über Ident ist ok
+            $this->SetValue($Ident, $v);
             $this->SetPending($Ident, $v);
+
             $this->SendToParent('SetGroupValue', array('id' => $gid, 'value' => $v));
             return;
         }
 
+        // Global Color (Hex int)
         if (substr($Ident, 0, 12) == 'GlobalColor_') {
             $cid = (int)substr($Ident, 12);
             $hexInt = (int)$Value;
 
-            $vid = $this->GetObjectIDByIdentRecursive($Ident);
-            if ($vid > 0) {
-                $this->SetVarValueIfChanged($vid, $hexInt);
-            }
-
+            $this->SetValue($Ident, $hexInt);
             $this->SetPending($Ident, $hexInt);
 
             $r = ($hexInt >> 16) & 0xFF;
@@ -109,20 +104,24 @@ class MadrixMaster extends IPSModule
             }
         }
 
-        // Groups (slow komplett, fast nur pending)
+        // Groups: existieren/aktualisieren (slow: alle, fast: pending subset)
         if (isset($data['groups']) && is_array($data['groups'])) {
             $this->EnsureGroupsFromStatus($data['groups']);
         }
 
-        // Colors (slow komplett, fast nur pending)
+        // Colors
         if (isset($data['colors']) && is_array($data['colors'])) {
             foreach ($data['colors'] as $c) {
                 if (!is_array($c)) continue;
                 $id = isset($c['id']) ? (int)$c['id'] : 0;
                 $hex = isset($c['hex']) ? (int)$c['hex'] : null;
                 if ($id <= 0 || $hex === null) continue;
+
                 $ident = 'GlobalColor_' . $id;
-                $this->ApplyPolledWithPending($ident, $hex, 0);
+                // Variable existiert nur, wenn sie in der Konfig ist
+                if (@$this->GetIDForIdent($ident) > 0) {
+                    $this->ApplyPolledWithPending($ident, $hex, 0);
+                }
             }
         }
     }
@@ -177,19 +176,24 @@ class MadrixMaster extends IPSModule
             if ($name === '') $name = 'Group ' . $id;
 
             $ident = 'Group_' . $id;
-            $vid = @IPS_GetObjectIDByIdent($ident, $cat);
 
-            if ($vid == 0) {
-                $vid = IPS_CreateVariable(1);
-                IPS_SetParent($vid, $cat);
-                IPS_SetIdent($vid, $ident);
-                IPS_SetName($vid, $name);
-                IPS_SetVariableCustomProfile($vid, 'MADRIX.Intensity255');
-                IPS_SetVariableCustomAction($vid, $this->InstanceID);
-                // Initialwert setzen (ohne IPS_SetValue!)
-                $this->SetVarValueIfChanged($vid, $val);
-            } else {
-                if (IPS_GetName($vid) != $name) IPS_SetName($vid, $name);
+            // WICHTIG: echte Modulvariable + EnableAction => RequestAction sicher
+            if (@$this->GetIDForIdent($ident) == 0) {
+                // Positionsraum: 1000+ damit es nicht mit Master/Blackout kollidiert
+                $this->RegisterVariableInteger($ident, $name, 'MADRIX.Intensity255', 1000 + $id);
+                $this->EnableAction($ident);
+            }
+
+            $vid = $this->GetIDForIdent($ident);
+            if ($vid > 0) {
+                // In "Groups" Kategorie einsortieren
+                if ((int)IPS_GetParent($vid) != (int)$cat) {
+                    @IPS_SetParent($vid, $cat);
+                }
+                if (IPS_GetName($vid) != $name) {
+                    IPS_SetName($vid, $name);
+                }
+
                 $this->ApplyPolledWithPending($ident, $val, 0);
             }
         }
@@ -212,20 +216,22 @@ class MadrixMaster extends IPSModule
             if ($name === '') $name = 'Global Color ' . $id;
 
             $ident = 'GlobalColor_' . $id;
-            $vid = @IPS_GetObjectIDByIdent($ident, $cat);
 
-            if ($vid == 0) {
-                $vid = IPS_CreateVariable(1);
-                IPS_SetParent($vid, $cat);
-                IPS_SetIdent($vid, $ident);
-                IPS_SetName($vid, $name);
+            if (@$this->GetIDForIdent($ident) == 0) {
+                // HexColor ist Integer (0xRRGGBB)
+                $this->RegisterVariableInteger($ident, $name, '~HexColor', 2000 + $id);
+                $this->EnableAction($ident);
+            }
+
+            $vid = $this->GetIDForIdent($ident);
+            if ($vid > 0) {
+                if ((int)IPS_GetParent($vid) != (int)$cat) {
+                    @IPS_SetParent($vid, $cat);
+                }
+                if (IPS_GetName($vid) != $name) {
+                    IPS_SetName($vid, $name);
+                }
                 IPS_SetVariableCustomProfile($vid, '~HexColor');
-                IPS_SetVariableCustomAction($vid, $this->InstanceID);
-                $this->SetVarValueIfChanged($vid, 0);
-            } else {
-                if (IPS_GetName($vid) != $name) IPS_SetName($vid, $name);
-                IPS_SetVariableCustomProfile($vid, '~HexColor');
-                IPS_SetVariableCustomAction($vid, $this->InstanceID);
             }
         }
     }
@@ -234,13 +240,13 @@ class MadrixMaster extends IPSModule
     {
         $payload = array(
             'DataID' => $this->DataID,
-            'cmd' => (string)$cmd,
-            'arg' => $arg
+            'cmd'    => (string)$cmd,
+            'arg'    => $arg
         );
-        @$this->SendDataToParent(json_encode($payload));
+        @ $this->SendDataToParent(json_encode($payload));
     }
 
-    // Pending: verhindert UI-Flipping
+    // Pending/UI-stabil
     private function ApplyPolledWithPending($ident, $polledValue, $epsilon)
     {
         $pending = $this->GetPending();
@@ -249,23 +255,23 @@ class MadrixMaster extends IPSModule
         if (isset($pending[$ident])) {
             $p = $pending[$ident];
             $deadline = isset($p['deadline']) ? (int)$p['deadline'] : 0;
-            $desired = isset($p['desired']) ? $p['desired'] : null;
+            $desired  = isset($p['desired']) ? $p['desired'] : null;
 
             if ($deadline > 0 && $now <= $deadline) {
                 if ($this->Matches($polledValue, $desired, $epsilon)) {
                     unset($pending[$ident]);
                     $this->SetBuffer('Pending', json_encode($pending));
-                    $this->SetValueByIdent($ident, $polledValue);
+                    $this->SetValue($ident, $polledValue);
                 } else {
                     return;
                 }
             } else {
                 unset($pending[$ident]);
                 $this->SetBuffer('Pending', json_encode($pending));
-                $this->SetValueByIdent($ident, $polledValue);
+                $this->SetValue($ident, $polledValue);
             }
         } else {
-            $this->SetValueByIdent($ident, $polledValue);
+            $this->SetValue($ident, $polledValue);
         }
     }
 
@@ -273,7 +279,7 @@ class MadrixMaster extends IPSModule
     {
         $pending = $this->GetPending();
         $pending[$ident] = array(
-            'desired' => $desired,
+            'desired'  => $desired,
             'deadline' => time() + 10
         );
         $this->SetBuffer('Pending', json_encode($pending));
@@ -292,37 +298,5 @@ class MadrixMaster extends IPSModule
         if ($b === null) return false;
         if ($epsilon <= 0) return ((string)$a === (string)$b);
         return abs((float)$a - (float)$b) <= (float)$epsilon;
-    }
-
-    private function SetValueByIdent($ident, $value)
-    {
-        // Base-Variablen oder dynamische Variablen in Kategorien
-        $vid = $this->GetObjectIDByIdentRecursive($ident);
-        if ($vid > 0) {
-            $this->SetVarValueIfChanged($vid, $value);
-        }
-    }
-
-    private function SetVarValueIfChanged($varId, $value)
-    {
-        if ($varId <= 0 || !IPS_ObjectExists($varId)) return;
-
-        $cur = GetValue($varId);
-        if ($cur !== $value) {
-            // korrekt: SetValue(VarID, Value)
-            @SetValue($varId, $value);
-        }
-    }
-
-    private function GetObjectIDByIdentRecursive($ident)
-    {
-        $id = @IPS_GetObjectIDByIdent($ident, $this->InstanceID);
-        if ($id > 0) return $id;
-
-        foreach (IPS_GetChildrenIDs($this->InstanceID) as $cid) {
-            $id = @IPS_GetObjectIDByIdent($ident, $cid);
-            if ($id > 0) return $id;
-        }
-        return 0;
     }
 }

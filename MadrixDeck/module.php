@@ -13,10 +13,10 @@ class MadrixDeck extends IPSModule
 
         $this->SetBuffer('Pending', json_encode(array()));
         $this->SetBuffer('LastAssocPlace', '0');
+        $this->SetBuffer('DescCache', json_encode(array())); // place(string) => desc
 
         $this->EnsureProfiles();
 
-        // Name bleibt konstant, Profil zeigt dynamische Association "Place X "Name""
         $this->RegisterVariableInteger('Place', 'Deck A Place', $this->GetPlaceProfile(), 10);
         $this->EnableAction('Place');
 
@@ -30,32 +30,25 @@ class MadrixDeck extends IPSModule
 
         $deck = $this->GetDeck();
 
-        // Konstanten Variablennamen setzen (falls Instanz kopiert/umbenannt wurde)
         $pvid = $this->GetIDForIdent('Place');
         if ($pvid > 0) {
             $pname = 'Deck ' . $deck . ' Place';
-            if (IPS_GetName($pvid) != $pname) {
-                IPS_SetName($pvid, $pname);
-            }
-            // Profil deckabhängig sicher setzen
+            if (IPS_GetName($pvid) != $pname) IPS_SetName($pvid, $pname);
             IPS_SetVariableCustomProfile($pvid, $this->GetPlaceProfile());
         }
 
         $svid = $this->GetIDForIdent('Speed');
         if ($svid > 0) {
             $sname = 'Deck ' . $deck . ' Speed';
-            if (IPS_GetName($svid) != $sname) {
-                IPS_SetName($svid, $sname);
-            }
+            if (IPS_GetName($svid) != $sname) IPS_SetName($svid, $sname);
         }
 
-        // Storage-Änderung soll sofort in MADRIX wirksam werden:
-        // aktuellen Place erneut mit Storage schreiben
+        // Storage-Änderung sofort wirksam: aktuellen Place erneut schreiben
         $place = $this->GetVarIntByIdent('Place', 1);
         $storage = $this->GetStorage();
         $this->SendToParent('SetDeckPlace', array('deck' => $deck, 'storage' => $storage, 'place' => $place));
 
-        // Association initial minimal korrekt (ohne Desc)
+        // Association initial aus Cache oder Fallback
         $this->UpdatePlaceAssociation($place, '');
     }
 
@@ -69,7 +62,7 @@ class MadrixDeck extends IPSModule
             $this->SetValue('Place', $place);
             $this->SetPending('Place', $place, 10);
 
-            // UI stabil: Association sofort auf Place X setzen (Name kommt später per Poll)
+            // sofort UI-Label setzen (aus Cache wenn vorhanden)
             $this->UpdatePlaceAssociation($place, '');
 
             $deck = $this->GetDeck();
@@ -115,7 +108,8 @@ class MadrixDeck extends IPSModule
             if ($place !== null) $this->ApplyPolledWithPending('Place', $place, 0);
             if ($speed !== null) $this->ApplyPolledWithPending('Speed', $speed, 0.05);
 
-            // Profil-Association für aktuellen Place setzen (mit MADRIX Description)
+            // Desc kommt oft nur bei slow/forceNames oder Place-Wechsel.
+            // WICHTIG: Wenn desc leer ist, NICHT überschreiben => Cache/alter Text bleibt.
             if ($place !== null) {
                 $this->UpdatePlaceAssociation($place, $desc);
             }
@@ -124,7 +118,6 @@ class MadrixDeck extends IPSModule
 
     private function EnsureProfiles()
     {
-        // Deck-spezifisches Place-Profil
         $pp = $this->GetPlaceProfile();
         if (!IPS_VariableProfileExists($pp)) {
             IPS_CreateVariableProfile($pp, 1);
@@ -140,48 +133,64 @@ class MadrixDeck extends IPSModule
 
     private function GetPlaceProfile()
     {
-        $deck = $this->GetDeck();
-        return 'MADRIX.Place.' . $deck;
+        return 'MADRIX.Place.' . $this->GetDeck();
     }
 
     private function UpdatePlaceAssociation($place, $desc)
     {
         $pp = $this->GetPlaceProfile();
-        if (!IPS_VariableProfileExists($pp)) {
-            // falls Create/Apply Reihenfolge ungünstig war
-            $this->EnsureProfiles();
-        }
+        if (!IPS_VariableProfileExists($pp)) $this->EnsureProfiles();
 
         $place = (int)$place;
         if ($place < 1) $place = 1;
         if ($place > 256) $place = 256;
 
+        $cache = $this->GetDescCache();
+
         $t = trim((string)$desc);
+        if ($t !== '') {
+            // Cache aktualisieren
+            $cache[(string)$place] = $t;
+            $this->SetDescCache($cache);
+        } else {
+            // Nur verwenden, wenn im Cache vorhanden – sonst NICHT "runterstufen"
+            if (isset($cache[(string)$place])) {
+                $t = (string)$cache[(string)$place];
+            }
+        }
+
         $label = 'Place ' . $place;
         if ($t !== '') {
             $label .= ' "' . $t . '"';
         }
 
-        // Alte Association (für vorherigen Place) „neutralisieren“:
-        // Wir überschreiben die alte Association auf reinen Zahlen-Text, damit die UI wieder "normal" ist.
+        // vorherigen Association-Eintrag neutralisieren, aber nur wenn wir wirklich umschalten
         $last = (int)$this->GetBuffer('LastAssocPlace');
         if ($last > 0 && $last != $place) {
             IPS_SetVariableProfileAssociation($pp, $last, (string)$last, '', 0);
         }
 
-        // Aktuelle Association setzen
         IPS_SetVariableProfileAssociation($pp, $place, $label, '', 0);
-
         $this->SetBuffer('LastAssocPlace', (string)$place);
+    }
+
+    private function GetDescCache()
+    {
+        $raw = $this->GetBuffer('DescCache');
+        $arr = json_decode($raw, true);
+        if (!is_array($arr)) $arr = array();
+        return $arr;
+    }
+
+    private function SetDescCache($arr)
+    {
+        if (!is_array($arr)) $arr = array();
+        $this->SetBuffer('DescCache', json_encode($arr));
     }
 
     private function SendToParent($cmd, $arg)
     {
-        $payload = array(
-            'DataID' => $this->DataID,
-            'cmd' => (string)$cmd,
-            'arg' => $arg
-        );
+        $payload = array('DataID' => $this->DataID, 'cmd' => (string)$cmd, 'arg' => $arg);
         @ $this->SendDataToParent(json_encode($payload));
     }
 
@@ -207,7 +216,6 @@ class MadrixDeck extends IPSModule
         return (int)GetValueInteger($vid);
     }
 
-    // Pending-Logik (UI flippt nicht)
     private function ApplyPolledWithPending($ident, $polledValue, $epsilon)
     {
         $pending = $this->GetPending();
@@ -239,10 +247,7 @@ class MadrixDeck extends IPSModule
     private function SetPending($ident, $desired, $seconds)
     {
         $pending = $this->GetPending();
-        $pending[$ident] = array(
-            'desired' => $desired,
-            'deadline' => time() + (int)$seconds
-        );
+        $pending[$ident] = array('desired' => $desired, 'deadline' => time() + (int)$seconds);
         $this->SetBuffer('Pending', json_encode($pending));
     }
 
