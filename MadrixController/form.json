@@ -61,17 +61,17 @@
     {
       "type": "Button",
       "caption": "Jetzt poll(en)",
-      "onClick": "MADRIX_Poll($_IPS['TARGET']);"
+      "onClick": "MADRIX_Poll($id);"
     },
     {
       "type": "Button",
       "caption": "Devices neu anlegen/prüfen",
-      "onClick": "MADRIX_EnsureDevices($_IPS['TARGET']);"
+      "onClick": "MADRIX_EnsureDevices($id);"
     },
     {
       "type": "Button",
       "caption": "Sync Names (Groups/Places) erzwingen",
-      "onClick": "MADRIX_ForceNameSync($_IPS['TARGET']);"
+      "onClick": "MADRIX_ForceNameSync($id);"
     }
   ]
 }
