@@ -14,7 +14,7 @@ class MadrixController extends IPSModule
         parent::Create();
 
         $this->RegisterPropertyString('Host', '');
-        $this->RegisterPropertyInteger('Port', 8008);
+        $this->RegisterPropertyInteger('Port', 80);
         $this->RegisterPropertyString('Username', '');
         $this->RegisterPropertyString('Password', '');
 

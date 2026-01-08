@@ -12,10 +12,12 @@ class MadrixDeck extends IPSModule
         $this->RegisterPropertyInteger('Storage', 1);
 
         $this->SetBuffer('Pending', json_encode(array()));
+        $this->SetBuffer('LastAssocPlace', '0');
 
         $this->EnsureProfiles();
 
-        $this->RegisterVariableInteger('Place', 'Deck A Place: 1', 'MADRIX.Place', 10);
+        // Name bleibt konstant, Profil zeigt dynamische Association "Place X "Name""
+        $this->RegisterVariableInteger('Place', 'Deck A Place', $this->GetPlaceProfile(), 10);
         $this->EnableAction('Place');
 
         $this->RegisterVariableFloat('Speed', 'Deck A Speed', 'MADRIX.Speed', 11);
@@ -28,15 +30,33 @@ class MadrixDeck extends IPSModule
 
         $deck = $this->GetDeck();
 
-        // sichere Abfrage des aktuellen Place-Wertes
-        $place = $this->GetVarIntByIdent('Place', 1);
-        $this->SetDeckPlaceName($deck, $place, '');
-
-        $sname = 'Deck ' . $deck . ' Speed';
-        $svid = $this->GetIDForIdent('Speed');
-        if ($svid > 0 && IPS_GetName($svid) != $sname) {
-            IPS_SetName($svid, $sname);
+        // Konstanten Variablennamen setzen (falls Instanz kopiert/umbenannt wurde)
+        $pvid = $this->GetIDForIdent('Place');
+        if ($pvid > 0) {
+            $pname = 'Deck ' . $deck . ' Place';
+            if (IPS_GetName($pvid) != $pname) {
+                IPS_SetName($pvid, $pname);
+            }
+            // Profil deckabhängig sicher setzen
+            IPS_SetVariableCustomProfile($pvid, $this->GetPlaceProfile());
         }
+
+        $svid = $this->GetIDForIdent('Speed');
+        if ($svid > 0) {
+            $sname = 'Deck ' . $deck . ' Speed';
+            if (IPS_GetName($svid) != $sname) {
+                IPS_SetName($svid, $sname);
+            }
+        }
+
+        // Storage-Änderung soll sofort in MADRIX wirksam werden:
+        // aktuellen Place erneut mit Storage schreiben
+        $place = $this->GetVarIntByIdent('Place', 1);
+        $storage = $this->GetStorage();
+        $this->SendToParent('SetDeckPlace', array('deck' => $deck, 'storage' => $storage, 'place' => $place));
+
+        // Association initial minimal korrekt (ohne Desc)
+        $this->UpdatePlaceAssociation($place, '');
     }
 
     public function RequestAction($Ident, $Value)
@@ -49,9 +69,11 @@ class MadrixDeck extends IPSModule
             $this->SetValue('Place', $place);
             $this->SetPending('Place', $place, 10);
 
+            // UI stabil: Association sofort auf Place X setzen (Name kommt später per Poll)
+            $this->UpdatePlaceAssociation($place, '');
+
             $deck = $this->GetDeck();
             $storage = $this->GetStorage();
-
             $this->SendToParent('SetDeckPlace', array('deck' => $deck, 'storage' => $storage, 'place' => $place));
             return;
         }
@@ -93,19 +115,20 @@ class MadrixDeck extends IPSModule
             if ($place !== null) $this->ApplyPolledWithPending('Place', $place, 0);
             if ($speed !== null) $this->ApplyPolledWithPending('Speed', $speed, 0.05);
 
-            // Name nur ändern, wenn Description geliefert wird
-            if (trim($desc) !== '') {
-                $curPlace = $this->GetVarIntByIdent('Place', 1);
-                $this->SetDeckPlaceName($myDeck, $curPlace, $desc);
+            // Profil-Association für aktuellen Place setzen (mit MADRIX Description)
+            if ($place !== null) {
+                $this->UpdatePlaceAssociation($place, $desc);
             }
         }
     }
 
     private function EnsureProfiles()
     {
-        if (!IPS_VariableProfileExists('MADRIX.Place')) {
-            IPS_CreateVariableProfile('MADRIX.Place', 1);
-            IPS_SetVariableProfileValues('MADRIX.Place', 1, 256, 1);
+        // Deck-spezifisches Place-Profil
+        $pp = $this->GetPlaceProfile();
+        if (!IPS_VariableProfileExists($pp)) {
+            IPS_CreateVariableProfile($pp, 1);
+            IPS_SetVariableProfileValues($pp, 1, 256, 1);
         }
 
         if (!IPS_VariableProfileExists('MADRIX.Speed')) {
@@ -115,19 +138,41 @@ class MadrixDeck extends IPSModule
         }
     }
 
-    private function SetDeckPlaceName($deck, $place, $desc)
+    private function GetPlaceProfile()
     {
-        // Deck A Place: 1 "Intro"
-        $name = 'Deck ' . $deck . ' Place: ' . (int)$place;
-        $t = trim((string)$desc);
-        if ($t !== '') {
-            $name .= ' "' . $t . '"';
+        $deck = $this->GetDeck();
+        return 'MADRIX.Place.' . $deck;
+    }
+
+    private function UpdatePlaceAssociation($place, $desc)
+    {
+        $pp = $this->GetPlaceProfile();
+        if (!IPS_VariableProfileExists($pp)) {
+            // falls Create/Apply Reihenfolge ungünstig war
+            $this->EnsureProfiles();
         }
 
-        $vid = $this->GetIDForIdent('Place');
-        if ($vid > 0 && IPS_GetName($vid) != $name) {
-            IPS_SetName($vid, $name);
+        $place = (int)$place;
+        if ($place < 1) $place = 1;
+        if ($place > 256) $place = 256;
+
+        $t = trim((string)$desc);
+        $label = 'Place ' . $place;
+        if ($t !== '') {
+            $label .= ' "' . $t . '"';
         }
+
+        // Alte Association (für vorherigen Place) „neutralisieren“:
+        // Wir überschreiben die alte Association auf reinen Zahlen-Text, damit die UI wieder "normal" ist.
+        $last = (int)$this->GetBuffer('LastAssocPlace');
+        if ($last > 0 && $last != $place) {
+            IPS_SetVariableProfileAssociation($pp, $last, (string)$last, '', 0);
+        }
+
+        // Aktuelle Association setzen
+        IPS_SetVariableProfileAssociation($pp, $place, $label, '', 0);
+
+        $this->SetBuffer('LastAssocPlace', (string)$place);
     }
 
     private function SendToParent($cmd, $arg)
