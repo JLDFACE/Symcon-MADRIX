@@ -63,7 +63,9 @@ class MadrixMaster extends IPSModule
             if ($v > 255) $v = 255;
 
             $vid = $this->GetObjectIDByIdentRecursive($Ident);
-            if ($vid > 0) SetValue($vid, $v);
+            if ($vid > 0) {
+                $this->SetVarValueIfChanged($vid, $v);
+            }
 
             $this->SetPending($Ident, $v);
             $this->SendToParent('SetGroupValue', array('id' => $gid, 'value' => $v));
@@ -75,7 +77,9 @@ class MadrixMaster extends IPSModule
             $hexInt = (int)$Value;
 
             $vid = $this->GetObjectIDByIdentRecursive($Ident);
-            if ($vid > 0) SetValue($vid, $hexInt);
+            if ($vid > 0) {
+                $this->SetVarValueIfChanged($vid, $hexInt);
+            }
 
             $this->SetPending($Ident, $hexInt);
 
@@ -162,7 +166,7 @@ class MadrixMaster extends IPSModule
     private function EnsureGroupsFromStatus($groups)
     {
         $cat = (int)$this->ReadAttributeInteger('CatGroups');
-        if ($cat == 0) return;
+        if ($cat == 0 || !IPS_ObjectExists($cat)) return;
 
         foreach ($groups as $g) {
             if (!is_array($g)) continue;
@@ -182,7 +186,8 @@ class MadrixMaster extends IPSModule
                 IPS_SetName($vid, $name);
                 IPS_SetVariableCustomProfile($vid, 'MADRIX.Intensity255');
                 IPS_SetVariableCustomAction($vid, $this->InstanceID);
-                IPS_SetValue($vid, $val);
+                // Initialwert setzen (ohne IPS_SetValue!)
+                $this->SetVarValueIfChanged($vid, $val);
             } else {
                 if (IPS_GetName($vid) != $name) IPS_SetName($vid, $name);
                 $this->ApplyPolledWithPending($ident, $val, 0);
@@ -193,7 +198,7 @@ class MadrixMaster extends IPSModule
     private function SyncColorVariablesFromConfig()
     {
         $cat = (int)$this->ReadAttributeInteger('CatColors');
-        if ($cat == 0) return;
+        if ($cat == 0 || !IPS_ObjectExists($cat)) return;
 
         $cfg = json_decode($this->ReadPropertyString('GlobalColors'), true);
         if (!is_array($cfg)) $cfg = array();
@@ -216,7 +221,7 @@ class MadrixMaster extends IPSModule
                 IPS_SetName($vid, $name);
                 IPS_SetVariableCustomProfile($vid, '~HexColor');
                 IPS_SetVariableCustomAction($vid, $this->InstanceID);
-                IPS_SetValue($vid, 0);
+                $this->SetVarValueIfChanged($vid, 0);
             } else {
                 if (IPS_GetName($vid) != $name) IPS_SetName($vid, $name);
                 IPS_SetVariableCustomProfile($vid, '~HexColor');
@@ -232,7 +237,7 @@ class MadrixMaster extends IPSModule
             'cmd' => (string)$cmd,
             'arg' => $arg
         );
-        @ $this->SendDataToParent(json_encode($payload));
+        @$this->SendDataToParent(json_encode($payload));
     }
 
     // Pending: verhindert UI-Flipping
@@ -266,7 +271,6 @@ class MadrixMaster extends IPSModule
 
     private function SetPending($ident, $desired)
     {
-        // Device-seitig 10s Default (Controller nutzt PendingTimeout)
         $pending = $this->GetPending();
         $pending[$ident] = array(
             'desired' => $desired,
@@ -292,10 +296,21 @@ class MadrixMaster extends IPSModule
 
     private function SetValueByIdent($ident, $value)
     {
+        // Base-Variablen oder dynamische Variablen in Kategorien
         $vid = $this->GetObjectIDByIdentRecursive($ident);
         if ($vid > 0) {
-            $cur = GetValue($vid);
-            if ($cur !== $value) SetValue($vid, $value);
+            $this->SetVarValueIfChanged($vid, $value);
+        }
+    }
+
+    private function SetVarValueIfChanged($varId, $value)
+    {
+        if ($varId <= 0 || !IPS_ObjectExists($varId)) return;
+
+        $cur = GetValue($varId);
+        if ($cur !== $value) {
+            // korrekt: SetValue(VarID, Value)
+            @SetValue($varId, $value);
         }
     }
 
