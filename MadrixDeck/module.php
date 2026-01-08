@@ -15,7 +15,7 @@ class MadrixDeck extends IPSModule
 
         $this->EnsureProfiles();
 
-        $this->RegisterVariableInteger('Place', 'Deck A Place', 'MADRIX.Place', 10);
+        $this->RegisterVariableInteger('Place', 'Deck A Place: 1', 'MADRIX.Place', 10);
         $this->EnableAction('Place');
 
         $this->RegisterVariableFloat('Speed', 'Deck A Speed', 'MADRIX.Speed', 11);
@@ -28,7 +28,8 @@ class MadrixDeck extends IPSModule
 
         $deck = $this->GetDeck();
 
-        $place = (int)$this->GetValueInteger('Place');
+        // sichere Abfrage des aktuellen Place-Wertes
+        $place = $this->GetVarIntByIdent('Place', 1);
         $this->SetDeckPlaceName($deck, $place, '');
 
         $sname = 'Deck ' . $deck . ' Speed';
@@ -92,8 +93,11 @@ class MadrixDeck extends IPSModule
             if ($place !== null) $this->ApplyPolledWithPending('Place', $place, 0);
             if ($speed !== null) $this->ApplyPolledWithPending('Speed', $speed, 0.05);
 
-            $curPlace = (int)$this->GetValueInteger('Place');
-            $this->SetDeckPlaceName($myDeck, $curPlace, $desc);
+            // Name nur ändern, wenn Description geliefert wird
+            if (trim($desc) !== '') {
+                $curPlace = $this->GetVarIntByIdent('Place', 1);
+                $this->SetDeckPlaceName($myDeck, $curPlace, $desc);
+            }
         }
     }
 
@@ -113,9 +117,8 @@ class MadrixDeck extends IPSModule
 
     private function SetDeckPlaceName($deck, $place, $desc)
     {
-        // finaler Name laut Vorgabe:
         // Deck A Place: 1 "Intro"
-        $name = 'Deck ' . $deck . ' Place: ' . $place;
+        $name = 'Deck ' . $deck . ' Place: ' . (int)$place;
         $t = trim((string)$desc);
         if ($t !== '') {
             $name .= ' "' . $t . '"';
@@ -152,6 +155,14 @@ class MadrixDeck extends IPSModule
         return $s;
     }
 
+    private function GetVarIntByIdent($ident, $fallback)
+    {
+        $vid = $this->GetIDForIdent($ident);
+        if ($vid <= 0) return (int)$fallback;
+        return (int)GetValueInteger($vid);
+    }
+
+    // Pending-Logik (UI flippt nicht)
     private function ApplyPolledWithPending($ident, $polledValue, $epsilon)
     {
         $pending = $this->GetPending();

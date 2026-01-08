@@ -67,7 +67,6 @@ class MadrixController extends IPSModule
     {
         if (!IPS_VariableProfileExists('MADRIX.Online')) {
             IPS_CreateVariableProfile('MADRIX.Online', 0);
-            // 0/1 Boolean, Beschriftung ist optional; Symcon zeigt i.d.R. den Status ohnehin klar an
             IPS_SetVariableProfileAssociation('MADRIX.Online', 0, 'Offline', '', 0);
             IPS_SetVariableProfileAssociation('MADRIX.Online', 1, 'Online', '', 0);
         }
@@ -78,29 +77,35 @@ class MadrixController extends IPSModule
         $cat = (int)$this->ReadAttributeInteger('DevicesCategory');
         if ($cat == 0 || !IPS_ObjectExists($cat)) {
             $cat = IPS_CreateCategory();
-            IPS_SetName($cat, 'Devices');
-            IPS_SetParent($cat, $this->InstanceID);
+            @IPS_SetName($cat, 'Devices');
+            @IPS_SetParent($cat, $this->InstanceID);
             $this->WriteAttributeInteger('DevicesCategory', $cat);
+        } else {
+            // Parent/Name nur setzen, wenn nötig (verhindert "Root kann nicht geändert werden")
+            if ((int)IPS_GetParent($cat) != (int)$this->InstanceID) {
+                @IPS_SetParent($cat, $this->InstanceID);
+            }
+            if (IPS_GetName($cat) != 'Devices') {
+                @IPS_SetName($cat, 'Devices');
+            }
         }
 
         // Master
         $master = (int)$this->ReadAttributeInteger('MasterInstance');
         if ($master == 0 || !IPS_ObjectExists($master)) {
             $master = IPS_CreateInstance($this->MasterModuleID);
-            IPS_SetName($master, 'Master');
-            IPS_SetParent($master, $cat);
             $this->WriteAttributeInteger('MasterInstance', $master);
         }
+        $this->PlaceInstance($master, $cat, 'Master');
         $this->TryConnectChild($master);
 
         // Deck A
         $deckA = (int)$this->ReadAttributeInteger('DeckAInstance');
         if ($deckA == 0 || !IPS_ObjectExists($deckA)) {
             $deckA = IPS_CreateInstance($this->DeckModuleID);
-            IPS_SetName($deckA, 'Deck A');
-            IPS_SetParent($deckA, $cat);
             $this->WriteAttributeInteger('DeckAInstance', $deckA);
         }
+        $this->PlaceInstance($deckA, $cat, 'Deck A');
         @IPS_SetProperty($deckA, 'Deck', 'A');
         @IPS_ApplyChanges($deckA);
         $this->TryConnectChild($deckA);
@@ -109,13 +114,27 @@ class MadrixController extends IPSModule
         $deckB = (int)$this->ReadAttributeInteger('DeckBInstance');
         if ($deckB == 0 || !IPS_ObjectExists($deckB)) {
             $deckB = IPS_CreateInstance($this->DeckModuleID);
-            IPS_SetName($deckB, 'Deck B');
-            IPS_SetParent($deckB, $cat);
             $this->WriteAttributeInteger('DeckBInstance', $deckB);
         }
+        $this->PlaceInstance($deckB, $cat, 'Deck B');
         @IPS_SetProperty($deckB, 'Deck', 'B');
         @IPS_ApplyChanges($deckB);
         $this->TryConnectChild($deckB);
+    }
+
+    private function PlaceInstance($instanceId, $parentCatId, $desiredName)
+    {
+        if ($instanceId <= 0 || !IPS_ObjectExists($instanceId)) return;
+
+        // Nur setzen, wenn nötig (verhindert "Root kann nicht geändert werden" im Apply-Kontext)
+        $curParent = (int)IPS_GetParent($instanceId);
+        if ($curParent != (int)$parentCatId) {
+            @IPS_SetParent($instanceId, $parentCatId);
+        }
+
+        if ($desiredName !== '' && IPS_GetName($instanceId) != $desiredName) {
+            @IPS_SetName($instanceId, $desiredName);
+        }
     }
 
     public function ForceNameSync()
