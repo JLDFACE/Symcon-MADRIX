@@ -1,7 +1,7 @@
 {
   "id": "{8D1C9B2A-7A6B-4D2D-9C9C-1A8F0E6F6B11}",
-  "author": "FACE",
-  "name": "Symcon-MADRIX",
+  "author": "FACE GmbH",
+  "name": "MADRIX",
   "url": "https://github.com/JLDFACE/Symcon-MADRIX",
   "compatibility": {
     "version": "6.0"
@@ -13,7 +13,7 @@
     {
       "id": "{2B3A6B8C-4C2D-4D1E-9F55-0D7B8C1A2E01}",
       "name": "MadrixController",
-      "type": 3,
+      "type": 2,
       "vendor": "MADRIX",
       "aliases": ["MADRIX Controller"],
       "parentRequirements": [],
@@ -28,7 +28,7 @@
       "aliases": ["MADRIX Master"],
       "parentRequirements": ["{E1B4B2E6-9D1C-4D5E-9C8B-0D3B1A2C3D41}"],
       "childRequirements": [],
-      "implemented": ["{E1B4B2E6-9D1C-4D5E-9C8B-0D3B1A2C3D41}"]
+      "implemented": []
     },
     {
       "id": "{C6C8F4A2-6D0C-4A2B-9D2B-7F2A0B1C9E31}",
@@ -38,7 +38,7 @@
       "aliases": ["MADRIX Deck"],
       "parentRequirements": ["{E1B4B2E6-9D1C-4D5E-9C8B-0D3B1A2C3D41}"],
       "childRequirements": [],
-      "implemented": ["{E1B4B2E6-9D1C-4D5E-9C8B-0D3B1A2C3D41}"]
+      "implemented": []
     }
   ]
 }
