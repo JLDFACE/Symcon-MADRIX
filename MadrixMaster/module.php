@@ -9,15 +9,17 @@ class MadrixMaster extends IPSModule
         parent::Create();
 
         $this->RegisterPropertyString('GlobalColors', '[]'); // [{"GlobalColorId":1},...]
+
         $this->RegisterAttributeInteger('CatGroups', 0);
         $this->RegisterAttributeInteger('CatColors', 0);
 
         $this->SetBuffer('GroupVarMap', json_encode(array()));  // gid => varId
         $this->SetBuffer('ColorVarMap', json_encode(array()));  // cid => varId
 
+        $this->EnsureProfiles();
         $this->EnsureCategories();
 
-        $this->RegisterVariableInteger('Master', 'Master', '~Intensity.255', 1);
+        $this->RegisterVariableInteger('Master', 'Master', 'MADRIX.Intensity255', 1);
         $this->EnableAction('Master');
 
         $this->RegisterVariableBoolean('Blackout', 'Blackout', '~Switch', 2);
@@ -27,7 +29,46 @@ class MadrixMaster extends IPSModule
     public function ApplyChanges()
     {
         parent::ApplyChanges();
+
+        $this->EnsureProfiles();
         $this->EnsureCategories();
+    }
+
+    // Damit MADRIX_ForceNameSync($id) auf Master nicht crasht: an Controller weiterleiten
+    public function ForceNameSync()
+    {
+        $payload = array(
+            'DataID' => $this->DataID,
+            'cmd'    => 'ForceNameSync',
+            'arg'    => null
+        );
+        @ $this->SendDataToParent(json_encode($payload));
+    }
+
+    // Optional: Scan trigger (falls du Button im Master/Form nutzt)
+    public function StartPlaceScan()
+    {
+        $payload = array(
+            'DataID' => $this->DataID,
+            'cmd'    => 'StartPlaceScan',
+            'arg'    => null
+        );
+        @ $this->SendDataToParent(json_encode($payload));
+    }
+
+    private function EnsureProfiles()
+    {
+        // Robust statt ~Intensity.255
+        if (!IPS_VariableProfileExists('MADRIX.Intensity255')) {
+            IPS_CreateVariableProfile('MADRIX.Intensity255', 1);
+            IPS_SetVariableProfileValues('MADRIX.Intensity255', 0, 255, 1);
+        }
+
+        // Robust statt ~HexColor
+        if (!IPS_VariableProfileExists('MADRIX.HexColor')) {
+            IPS_CreateVariableProfile('MADRIX.HexColor', 1);
+            IPS_SetVariableProfileValues('MADRIX.HexColor', 0, 16777215, 1);
+        }
     }
 
     private function EnsureCategories()
@@ -38,6 +79,9 @@ class MadrixMaster extends IPSModule
             @IPS_SetName($cg, 'Groups');
             @IPS_SetParent($cg, $this->InstanceID);
             $this->WriteAttributeInteger('CatGroups', $cg);
+        } else {
+            if ((int)IPS_GetParent($cg) != (int)$this->InstanceID) @IPS_SetParent($cg, $this->InstanceID);
+            if (IPS_GetName($cg) != 'Groups') @IPS_SetName($cg, 'Groups');
         }
 
         $cc = (int)$this->ReadAttributeInteger('CatColors');
@@ -46,6 +90,9 @@ class MadrixMaster extends IPSModule
             @IPS_SetName($cc, 'Global Colors');
             @IPS_SetParent($cc, $this->InstanceID);
             $this->WriteAttributeInteger('CatColors', $cc);
+        } else {
+            if ((int)IPS_GetParent($cc) != (int)$this->InstanceID) @IPS_SetParent($cc, $this->InstanceID);
+            if (IPS_GetName($cc) != 'Global Colors') @IPS_SetName($cc, 'Global Colors');
         }
     }
 
@@ -81,6 +128,9 @@ class MadrixMaster extends IPSModule
             $cid = (int)substr($Ident, 6);
             $hex = (int)$Value;
 
+            if ($hex < 0) $hex = 0;
+            if ($hex > 16777215) $hex = 16777215;
+
             $r = ($hex >> 16) & 0xFF;
             $g = ($hex >> 8) & 0xFF;
             $b = $hex & 0xFF;
@@ -113,6 +163,7 @@ class MadrixMaster extends IPSModule
         $cat = (int)$this->ReadAttributeInteger('CatGroups');
 
         $map = $this->GetJsonBuffer('GroupVarMap');
+
         foreach ($groups as $g) {
             if (!is_array($g)) continue;
             $gid = isset($g['id']) ? (int)$g['id'] : 0;
@@ -122,8 +173,9 @@ class MadrixMaster extends IPSModule
             $val = isset($g['val']) ? (int)$g['val'] : 0;
 
             $ident = 'Group_' . $gid;
+
             if (!isset($map[(string)$gid]) || !IPS_ObjectExists((int)$map[(string)$gid])) {
-                $this->RegisterVariableInteger($ident, $name, '~Intensity.255', 1000 + $gid);
+                $this->RegisterVariableInteger($ident, $name, 'MADRIX.Intensity255', 1000 + $gid);
                 $vid = $this->GetIDForIdent($ident);
                 if ($vid > 0) {
                     @IPS_SetParent($vid, $cat);
@@ -137,6 +189,7 @@ class MadrixMaster extends IPSModule
 
             if ($this->GetIDForIdent($ident) > 0) $this->SetValue($ident, $val);
         }
+
         $this->SetBuffer('GroupVarMap', json_encode($map));
     }
 
@@ -146,17 +199,21 @@ class MadrixMaster extends IPSModule
         $cat = (int)$this->ReadAttributeInteger('CatColors');
 
         $map = $this->GetJsonBuffer('ColorVarMap');
+
         foreach ($colors as $c) {
             if (!is_array($c)) continue;
             $cid = isset($c['id']) ? (int)$c['id'] : 0;
             if ($cid <= 0) continue;
 
             $hex = isset($c['hex']) ? (int)$c['hex'] : 0;
+            if ($hex < 0) $hex = 0;
+            if ($hex > 16777215) $hex = 16777215;
+
             $ident = 'Color_' . $cid;
             $name = 'Global Color ' . $cid;
 
             if (!isset($map[(string)$cid]) || !IPS_ObjectExists((int)$map[(string)$cid])) {
-                $this->RegisterVariableInteger($ident, $name, '~HexColor', 2000 + $cid);
+                $this->RegisterVariableInteger($ident, $name, 'MADRIX.HexColor', 2000 + $cid);
                 $vid = $this->GetIDForIdent($ident);
                 if ($vid > 0) {
                     @IPS_SetParent($vid, $cat);
@@ -170,6 +227,7 @@ class MadrixMaster extends IPSModule
 
             if ($this->GetIDForIdent($ident) > 0) $this->SetValue($ident, $hex);
         }
+
         $this->SetBuffer('ColorVarMap', json_encode($map));
     }
 
