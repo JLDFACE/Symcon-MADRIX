@@ -1,15 +1,41 @@
 {
   "elements": [
     {
-      "type": "TextArea",
-      "name": "GlobalColors",
-      "caption": "Global Colors JSON (optional)"
+      "type": "ExpansionPanel",
+      "caption": "Global Colors",
+      "items": [
+        {
+          "type": "Label",
+          "caption": "Konfiguration als JSON-Array. Beispiel: [{\"GlobalColorId\":1},{\"GlobalColorId\":2}]"
+        },
+        {
+          "type": "ValidationTextBox",
+          "name": "GlobalColors",
+          "caption": "GlobalColors (JSON)"
+        }
+      ]
+    },
+    {
+      "type": "ExpansionPanel",
+      "caption": "Gruppen",
+      "items": [
+        {
+          "type": "Label",
+          "caption": "Gruppen werden automatisch aus MADRIX gelesen und als Instanzen unterhalb der Gruppe-Kategorie angelegt."
+        }
+      ]
     }
   ],
   "actions": [
     {
-      "type": "Label",
-      "caption": "Master/Blackout, Groups und Global Colors werden automatisch als Variablen unter den Kategorien 'Groups' und 'Global Colors' angelegt."
+      "type": "Button",
+      "caption": "Namen/Struktur neu synchronisieren",
+      "onClick": "MADRIX_ForceNameSync($id);"
+    },
+    {
+      "type": "Button",
+      "caption": "Place Scan starten (nur belegte Places)",
+      "onClick": "MADRIX_StartPlaceScan($id);"
     }
   ]
 }
