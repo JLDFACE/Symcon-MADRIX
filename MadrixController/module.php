@@ -89,20 +89,26 @@ class MadrixController extends IPSModule
     }
 
     private function EnsureProfiles()
-    {
-        if (!IPS_VariableProfileExists('MADRIX.Online')) {
-            IPS_CreateVariableProfile('MADRIX.Online', 0);
-            IPS_SetVariableProfileAssociation('MADRIX.Online', 0, 'Offline', '', 0);
-            IPS_SetVariableProfileAssociation('MADRIX.Online', 1, 'Online', '', 0);
-        }
-
-        // Robust statt ~Percent (nicht überall vorhanden)
-        if (!IPS_VariableProfileExists('MADRIX.Percent')) {
-            IPS_CreateVariableProfile('MADRIX.Percent', 1);
-            IPS_SetVariableProfileValues('MADRIX.Percent', 0, 100, 1);
-            IPS_SetVariableProfileSuffix('MADRIX.Percent', ' %');
-        }
+{
+    if (!IPS_VariableProfileExists('MADRIX.Online')) {
+        IPS_CreateVariableProfile('MADRIX.Online', 0);
+        IPS_SetVariableProfileAssociation('MADRIX.Online', 0, 'Offline', '', 0);
+        IPS_SetVariableProfileAssociation('MADRIX.Online', 1, 'Online', '', 0);
     }
+
+    if (!IPS_VariableProfileExists('MADRIX.Percent')) 
+        {
+        IPS_CreateVariableProfile('MADRIX.Percent', 1);
+        IPS_SetVariableProfileValues('MADRIX.Percent', 0, 100, 1);
+
+        // SymBox/ältere Versionen: Funktion existiert ggf. nicht
+        if (function_exists('IPS_SetVariableProfileSuffix')) 
+            {
+            IPS_SetVariableProfileSuffix('MADRIX.Percent', ' %');
+            }
+        }
+}
+
 
     public function EnsureDevices()
     {
