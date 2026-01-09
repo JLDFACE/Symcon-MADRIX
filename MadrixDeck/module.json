@@ -2,9 +2,9 @@
   "id": "{C6C8F4A2-6D0C-4A2B-9D2B-7F2A0B1C9E31}",
   "name": "MADRIX Deck",
   "type": 3,
-  "vendor": "FACE GmbH",
+  "vendor": "MADRIX",
   "aliases": [
-    "MADRIX Deck Device"
+    "MADRIX Deck"
   ],
   "parentRequirements": [
     "{E1B4B2E6-9D1C-4D5E-9C8B-0D3B1A2C3D41}"

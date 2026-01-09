@@ -1,44 +1,43 @@
-# FACE MADRIX (IP-Symcon)
+# Symcon-MADRIX (IP-Symcon)
 
-Dieses Repository enthält Module zur Steuerung von MADRIX-Instanzen über Remote HTTP als Zentral-Instanz + Devices.
+Dieses Repository stellt IP-Symcon-Module zur Steuerung einer MADRIX-Instanz via **MADRIX Remote HTTP** bereit.
 
 ## Module
 
-### 1) MADRIX Controller (Zentrale Instanz)
-- Host/Port + optional BasicAuth
-- Online + LastError (Diagnose)
-- Polling (Slow/Fast + FastAfterChange)
-- Auto-Anlage (beim Hinzufügen/Apply):
-  - Kategorie "Devices"
-  - MADRIX Master Device
-  - MADRIX Deck A Device
-  - MADRIX Deck B Device
-
-### 2) MADRIX Master (Device)
-- Master (0..255), Blackout
-- Groups: automatisch angelegt, Name aus MADRIX, Intensity (0..255)
-- Global Colors: konfigurierbare Liste (ID + Name), pro ID eine ~HexColor Variable
-
-### 3) MADRIX Deck (Device)
-- Deck A/B + Storage in der Device-Konfiguration
-- Place (int): Variablenname dynamisch, z. B. `Deck A Place: 1 "Intro"`
-- Speed (float): -10..10
-
-## Polling / Performance
-
-- PollSlow (Default 15s): kompletter Status (Master, Decks, alle Groups, alle Global Colors)
-- PollFast (Default 2s): nur Master + Decks + Pending-Items
-  - Groups/Colors werden im Fast-Poll nur für aktuell pending IDs abgefragt
-- FastAfterChange: nach Actions oder erkannten Änderungen für X Sekunden im Fast-Poll
+- **MADRIX Controller** (Zentrale Instanz)
+  - Konfiguration: Host/Port/BasicAuth
+  - Polling (Slow/Fast), FastAfterChange
+  - Automatische Anlage von Devices (Master, Deck A, Deck B)
+  - Place-Metadaten Cache (ThumbTimeStamp) + Bulk-Labeling für alle belegten Places (Scan)
+- **MADRIX Master**
+  - Master/Blackout
+  - Groups (Intensity)
+  - Global Colors (RGB)
+  - Kategorien unter der Master-Instanz: `Groups`, `Global Colors`
+- **MADRIX Deck**
+  - Deck A / Deck B Place (Integer 1..256)
+  - Deck A / Deck B Speed (-10..10)
+  - Place-Profile-Beschriftung: `Place X "Name"` (Name aus MADRIX)
 
 ## Installation
 
-1. Module Control → Repository hinzufügen:
+1. IP-Symcon -> **Module Control** -> **Hinzufügen** -> GitHub URL eintragen:
    - https://github.com/JLDFACE/Symcon-MADRIX
-2. Instanz "MADRIX Controller" erstellen, Host/Port konfigurieren
-3. Devices werden automatisch unterhalb der Controller-Instanz angelegt (Kategorie "Devices")
+2. Module installieren/aktualisieren.
+3. Instanz **MADRIX Controller** anlegen und Host/Port konfigurieren.
+4. Der Controller legt automatisch unterhalb eine Kategorie `Devices` an und darin:
+   - `Master`
+   - `Deck A`
+   - `Deck B`
+
+## Place-Namen / belegte Places
+
+- Der Controller nutzt `GetStoragePlaceThumbTimeStamp=SxPy` als Änderungsindikator.
+- Ein Scan der belegten Places kann über den Button in der Controller-Konfiguration ausgelöst werden.
+  - Warnung: Der Scan iteriert Storages/Places (RemoteHTTP) und kann – abhängig von Belegung/Latenz – Sekunden bis Minuten dauern.
+- Nach Scan werden alle **belegten** Places im Variablenprofil der Decks mit `Place X "Name"` beschriftet.
 
 ## Hinweise
 
-- Remote HTTP wird per kurzlebigen HTTP-Requests genutzt (kein IO-Modul erforderlich).
-- UI-Stabilität: Pending-Logik verhindert Flippen nach Sollwert-Änderungen.
+- SymBox-sicher: keine strict types, keine PHP 8 Typen, keine globalen Funktionen außerhalb der Klassen.
+- Fehler werden nicht als Fatal eskaliert; `Online` und `LastError` werden gepflegt.

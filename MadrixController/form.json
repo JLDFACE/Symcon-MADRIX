@@ -3,7 +3,7 @@
     {
       "type": "ValidationTextBox",
       "name": "Host",
-      "caption": "Host / IP"
+      "caption": "Host/IP"
     },
     {
       "type": "NumberSpinner",
@@ -15,62 +15,62 @@
     {
       "type": "ValidationTextBox",
       "name": "Username",
-      "caption": "Username (optional, Basic Auth)"
+      "caption": "Username (Basic Auth)"
     },
     {
       "type": "PasswordTextBox",
       "name": "Password",
-      "caption": "Password (optional, Basic Auth)"
+      "caption": "Password (Basic Auth)"
     },
     {
-      "type": "ExpansionPanel",
-      "caption": "Polling / Performance",
-      "items": [
-        {
-          "type": "NumberSpinner",
-          "name": "PollSlow",
-          "caption": "PollSlow (Sek.)",
-          "minimum": 5,
-          "maximum": 3600
-        },
-        {
-          "type": "NumberSpinner",
-          "name": "PollFast",
-          "caption": "PollFast (Sek.)",
-          "minimum": 2,
-          "maximum": 60
-        },
-        {
-          "type": "NumberSpinner",
-          "name": "FastAfterChange",
-          "caption": "FastAfterChange (Sek.)",
-          "minimum": 0,
-          "maximum": 300
-        },
-        {
-          "type": "NumberSpinner",
-          "name": "PendingTimeout",
-          "caption": "Pending-Timeout (Sek.)",
-          "minimum": 2,
-          "maximum": 60
-        }
-      ]
+      "type": "NumberSpinner",
+      "name": "PollSlow",
+      "caption": "PollSlow (s)",
+      "minimum": 5,
+      "maximum": 300
+    },
+    {
+      "type": "NumberSpinner",
+      "name": "PollFast",
+      "caption": "PollFast (s)",
+      "minimum": 2,
+      "maximum": 30
+    },
+    {
+      "type": "NumberSpinner",
+      "name": "FastAfterChange",
+      "caption": "FastAfterChange (s)",
+      "minimum": 0,
+      "maximum": 120
+    },
+    {
+      "type": "NumberSpinner",
+      "name": "PendingTimeout",
+      "caption": "PendingTimeout (s)",
+      "minimum": 2,
+      "maximum": 60
+    },
+    {
+      "type": "NumberSpinner",
+      "name": "ScanChunk",
+      "caption": "ScanChunk (pro Tick)",
+      "minimum": 1,
+      "maximum": 32
     }
   ],
   "actions": [
     {
-      "type": "Button",
-      "caption": "Jetzt poll(en)",
-      "onClick": "MADRIX_Poll($id);"
+      "type": "Label",
+      "caption": "Warnung: Der Place-Scan iteriert Storages/Places per RemoteHTTP. Abhängig von Anzahl belegter Storages/Places kann das Sekunden bis Minuten dauern."
     },
     {
       "type": "Button",
-      "caption": "Devices neu anlegen/prüfen",
-      "onClick": "MADRIX_EnsureDevices($id);"
+      "caption": "Scan belegte Places (Cache füllen)",
+      "onClick": "MADRIX_StartPlaceScan($id);"
     },
     {
       "type": "Button",
-      "caption": "Sync Names (Groups/Places) erzwingen",
+      "caption": "Namen/Labels einmalig nachziehen (ForceNameSync)",
       "onClick": "MADRIX_ForceNameSync($id);"
     }
   ]

@@ -8,81 +8,85 @@ class MadrixMaster extends IPSModule
     {
         parent::Create();
 
-        // Konfig: bis zu 20 Global Colors
-        $this->RegisterPropertyString('GlobalColors', '[]');
-
+        $this->RegisterPropertyString('GlobalColors', '[]'); // [{"GlobalColorId":1},...]
         $this->RegisterAttributeInteger('CatGroups', 0);
         $this->RegisterAttributeInteger('CatColors', 0);
 
-        $this->SetBuffer('Pending', json_encode(array()));
+        $this->SetBuffer('GroupVarMap', json_encode(array()));  // gid => varId
+        $this->SetBuffer('ColorVarMap', json_encode(array()));  // cid => varId
+
+        $this->EnsureCategories();
+
+        $this->RegisterVariableInteger('Master', 'Master', '~Intensity.255', 1);
+        $this->EnableAction('Master');
+
+        $this->RegisterVariableBoolean('Blackout', 'Blackout', '~Switch', 2);
+        $this->EnableAction('Blackout');
     }
 
     public function ApplyChanges()
     {
         parent::ApplyChanges();
-
-        $this->EnsureProfiles();
         $this->EnsureCategories();
-        $this->EnsureBaseVariables();
+    }
 
-        // Aus Konfiguration die Global-Color Variablen erzeugen
-        $this->SyncColorVariablesFromConfig();
+    private function EnsureCategories()
+    {
+        $cg = (int)$this->ReadAttributeInteger('CatGroups');
+        if ($cg == 0 || !IPS_ObjectExists($cg)) {
+            $cg = IPS_CreateCategory();
+            @IPS_SetName($cg, 'Groups');
+            @IPS_SetParent($cg, $this->InstanceID);
+            $this->WriteAttributeInteger('CatGroups', $cg);
+        }
+
+        $cc = (int)$this->ReadAttributeInteger('CatColors');
+        if ($cc == 0 || !IPS_ObjectExists($cc)) {
+            $cc = IPS_CreateCategory();
+            @IPS_SetName($cc, 'Global Colors');
+            @IPS_SetParent($cc, $this->InstanceID);
+            $this->WriteAttributeInteger('CatColors', $cc);
+        }
     }
 
     public function RequestAction($Ident, $Value)
     {
-        // Master
         if ($Ident == 'Master') {
             $v = (int)$Value;
             if ($v < 0) $v = 0;
             if ($v > 255) $v = 255;
-
             $this->SetValue('Master', $v);
-            $this->SetPending($Ident, $v);
-
             $this->SendToParent('SetMaster', $v);
             return;
         }
 
-        // Blackout
         if ($Ident == 'Blackout') {
-            $b = ((bool)$Value) ? 1 : 0;
-
-            $this->SetValue('Blackout', (bool)$Value);
-            $this->SetPending($Ident, $b);
-
+            $b = ((bool)$Value) ? true : false;
+            $this->SetValue('Blackout', $b);
             $this->SendToParent('SetBlackout', $b);
             return;
         }
 
-        // Group Intensity
         if (substr($Ident, 0, 6) == 'Group_') {
             $gid = (int)substr($Ident, 6);
-            $v = (int)$Value;
-            if ($v < 0) $v = 0;
-            if ($v > 255) $v = 255;
-
-            // Variable ist eine echte Modulvariable => SetValue über Ident ist ok
-            $this->SetValue($Ident, $v);
-            $this->SetPending($Ident, $v);
-
-            $this->SendToParent('SetGroupValue', array('id' => $gid, 'value' => $v));
+            $val = (int)$Value;
+            if ($val < 0) $val = 0;
+            if ($val > 255) $val = 255;
+            $this->SetValue($Ident, $val);
+            $this->SendToParent('SetGroupValue', array('id' => $gid, 'value' => $val));
             return;
         }
 
-        // Global Color (Hex int)
-        if (substr($Ident, 0, 12) == 'GlobalColor_') {
-            $cid = (int)substr($Ident, 12);
-            $hexInt = (int)$Value;
+        if (substr($Ident, 0, 6) == 'Color_') {
+            $cid = (int)substr($Ident, 6);
+            $hex = (int)$Value;
 
-            $this->SetValue($Ident, $hexInt);
-            $this->SetPending($Ident, $hexInt);
+            $r = ($hex >> 16) & 0xFF;
+            $g = ($hex >> 8) & 0xFF;
+            $b = $hex & 0xFF;
 
-            $r = ($hexInt >> 16) & 0xFF;
-            $g = ($hexInt >> 8) & 0xFF;
-            $b = ($hexInt) & 0xFF;
-
-            $this->SendToParent('SetGlobalColorRGB', array('id' => $cid, 'r' => $r, 'g' => $g, 'b' => $b, 'hex' => $hexInt));
+            $this->SetValue($Ident, $hex);
+            $this->SendToParent('SetGlobalColorRGB', array('id' => $cid, 'r' => $r, 'g' => $g, 'b' => $b, 'hex' => $hex));
             return;
         }
     }
@@ -94,209 +98,92 @@ class MadrixMaster extends IPSModule
         if (!isset($data['DataID']) || $data['DataID'] != $this->DataID) return;
         if (!isset($data['type']) || $data['type'] != 'status') return;
 
-        // Master
         if (isset($data['master']) && is_array($data['master'])) {
-            if (isset($data['master']['master'])) {
-                $this->ApplyPolledWithPending('Master', (int)$data['master']['master'], 0);
-            }
-            if (isset($data['master']['blackout'])) {
-                $this->ApplyPolledWithPending('Blackout', ((int)$data['master']['blackout']) == 1, 0);
-            }
+            if (isset($data['master']['master'])) $this->SetValue('Master', (int)$data['master']['master']);
+            if (isset($data['master']['blackout'])) $this->SetValue('Blackout', ((int)$data['master']['blackout'] == 1));
         }
 
-        // Groups: existieren/aktualisieren (slow: alle, fast: pending subset)
-        if (isset($data['groups']) && is_array($data['groups'])) {
-            $this->EnsureGroupsFromStatus($data['groups']);
-        }
-
-        // Colors
-        if (isset($data['colors']) && is_array($data['colors'])) {
-            foreach ($data['colors'] as $c) {
-                if (!is_array($c)) continue;
-                $id = isset($c['id']) ? (int)$c['id'] : 0;
-                $hex = isset($c['hex']) ? (int)$c['hex'] : null;
-                if ($id <= 0 || $hex === null) continue;
-
-                $ident = 'GlobalColor_' . $id;
-                // Variable existiert nur, wenn sie in der Konfig ist
-                if (@$this->GetIDForIdent($ident) > 0) {
-                    $this->ApplyPolledWithPending($ident, $hex, 0);
-                }
-            }
-        }
+        if (isset($data['groups']) && is_array($data['groups'])) $this->EnsureGroupVars($data['groups']);
+        if (isset($data['colors']) && is_array($data['colors'])) $this->EnsureColorVars($data['colors']);
     }
 
-    private function EnsureProfiles()
+    private function EnsureGroupVars($groups)
     {
-        if (!IPS_VariableProfileExists('MADRIX.Intensity255')) {
-            IPS_CreateVariableProfile('MADRIX.Intensity255', 1);
-            IPS_SetVariableProfileValues('MADRIX.Intensity255', 0, 255, 1);
-        }
-    }
-
-    private function EnsureCategories()
-    {
-        $g = (int)$this->ReadAttributeInteger('CatGroups');
-        if ($g == 0 || !IPS_ObjectExists($g)) {
-            $g = IPS_CreateCategory();
-            IPS_SetName($g, 'Groups');
-            IPS_SetParent($g, $this->InstanceID);
-            $this->WriteAttributeInteger('CatGroups', $g);
-        }
-
-        $c = (int)$this->ReadAttributeInteger('CatColors');
-        if ($c == 0 || !IPS_ObjectExists($c)) {
-            $c = IPS_CreateCategory();
-            IPS_SetName($c, 'Global Colors');
-            IPS_SetParent($c, $this->InstanceID);
-            $this->WriteAttributeInteger('CatColors', $c);
-        }
-    }
-
-    private function EnsureBaseVariables()
-    {
-        $this->RegisterVariableInteger('Master', 'Master', 'MADRIX.Intensity255', 10);
-        $this->EnableAction('Master');
-
-        $this->RegisterVariableBoolean('Blackout', 'Blackout', '~Switch', 11);
-        $this->EnableAction('Blackout');
-    }
-
-    private function EnsureGroupsFromStatus($groups)
-    {
+        $this->EnsureCategories();
         $cat = (int)$this->ReadAttributeInteger('CatGroups');
-        if ($cat == 0 || !IPS_ObjectExists($cat)) return;
 
+        $map = $this->GetJsonBuffer('GroupVarMap');
         foreach ($groups as $g) {
             if (!is_array($g)) continue;
-            $id = isset($g['id']) ? (int)$g['id'] : 0;
-            $name = isset($g['name']) ? trim((string)$g['name']) : '';
+            $gid = isset($g['id']) ? (int)$g['id'] : 0;
+            if ($gid <= 0) continue;
+
+            $name = isset($g['name']) ? (string)$g['name'] : ('Group ' . $gid);
             $val = isset($g['val']) ? (int)$g['val'] : 0;
-            if ($id <= 0) continue;
-            if ($name === '') $name = 'Group ' . $id;
 
-            $ident = 'Group_' . $id;
-
-            // WICHTIG: echte Modulvariable + EnableAction => RequestAction sicher
-            if (@$this->GetIDForIdent($ident) == 0) {
-                // Positionsraum: 1000+ damit es nicht mit Master/Blackout kollidiert
-                $this->RegisterVariableInteger($ident, $name, 'MADRIX.Intensity255', 1000 + $id);
-                $this->EnableAction($ident);
-            }
-
-            $vid = $this->GetIDForIdent($ident);
-            if ($vid > 0) {
-                // In "Groups" Kategorie einsortieren
-                if ((int)IPS_GetParent($vid) != (int)$cat) {
+            $ident = 'Group_' . $gid;
+            if (!isset($map[(string)$gid]) || !IPS_ObjectExists((int)$map[(string)$gid])) {
+                $this->RegisterVariableInteger($ident, $name, '~Intensity.255', 1000 + $gid);
+                $vid = $this->GetIDForIdent($ident);
+                if ($vid > 0) {
                     @IPS_SetParent($vid, $cat);
+                    $this->EnableAction($ident);
+                    $map[(string)$gid] = $vid;
                 }
-                if (IPS_GetName($vid) != $name) {
-                    IPS_SetName($vid, $name);
-                }
-
-                $this->ApplyPolledWithPending($ident, $val, 0);
+            } else {
+                $vid = (int)$map[(string)$gid];
+                if ($vid > 0 && IPS_ObjectExists($vid) && IPS_GetName($vid) != $name) @IPS_SetName($vid, $name);
             }
+
+            if ($this->GetIDForIdent($ident) > 0) $this->SetValue($ident, $val);
         }
+        $this->SetBuffer('GroupVarMap', json_encode($map));
     }
 
-    private function SyncColorVariablesFromConfig()
+    private function EnsureColorVars($colors)
     {
+        $this->EnsureCategories();
         $cat = (int)$this->ReadAttributeInteger('CatColors');
-        if ($cat == 0 || !IPS_ObjectExists($cat)) return;
 
-        $cfg = json_decode($this->ReadPropertyString('GlobalColors'), true);
-        if (!is_array($cfg)) $cfg = array();
+        $map = $this->GetJsonBuffer('ColorVarMap');
+        foreach ($colors as $c) {
+            if (!is_array($c)) continue;
+            $cid = isset($c['id']) ? (int)$c['id'] : 0;
+            if ($cid <= 0) continue;
 
-        foreach ($cfg as $entry) {
-            if (!is_array($entry)) continue;
-            $id = isset($entry['GlobalColorId']) ? (int)$entry['GlobalColorId'] : 0;
-            if ($id <= 0) continue;
+            $hex = isset($c['hex']) ? (int)$c['hex'] : 0;
+            $ident = 'Color_' . $cid;
+            $name = 'Global Color ' . $cid;
 
-            $name = isset($entry['Name']) ? trim((string)$entry['Name']) : '';
-            if ($name === '') $name = 'Global Color ' . $id;
-
-            $ident = 'GlobalColor_' . $id;
-
-            if (@$this->GetIDForIdent($ident) == 0) {
-                // HexColor ist Integer (0xRRGGBB)
-                $this->RegisterVariableInteger($ident, $name, '~HexColor', 2000 + $id);
-                $this->EnableAction($ident);
-            }
-
-            $vid = $this->GetIDForIdent($ident);
-            if ($vid > 0) {
-                if ((int)IPS_GetParent($vid) != (int)$cat) {
+            if (!isset($map[(string)$cid]) || !IPS_ObjectExists((int)$map[(string)$cid])) {
+                $this->RegisterVariableInteger($ident, $name, '~HexColor', 2000 + $cid);
+                $vid = $this->GetIDForIdent($ident);
+                if ($vid > 0) {
                     @IPS_SetParent($vid, $cat);
+                    $this->EnableAction($ident);
+                    $map[(string)$cid] = $vid;
                 }
-                if (IPS_GetName($vid) != $name) {
-                    IPS_SetName($vid, $name);
-                }
-                IPS_SetVariableCustomProfile($vid, '~HexColor');
+            } else {
+                $vid = (int)$map[(string)$cid];
+                if ($vid > 0 && IPS_ObjectExists($vid) && IPS_GetName($vid) != $name) @IPS_SetName($vid, $name);
             }
+
+            if ($this->GetIDForIdent($ident) > 0) $this->SetValue($ident, $hex);
         }
+        $this->SetBuffer('ColorVarMap', json_encode($map));
     }
 
     private function SendToParent($cmd, $arg)
     {
-        $payload = array(
-            'DataID' => $this->DataID,
-            'cmd'    => (string)$cmd,
-            'arg'    => $arg
-        );
+        $payload = array('DataID' => $this->DataID, 'cmd' => (string)$cmd, 'arg' => $arg);
         @ $this->SendDataToParent(json_encode($payload));
     }
 
-    // Pending/UI-stabil
-    private function ApplyPolledWithPending($ident, $polledValue, $epsilon)
+    private function GetJsonBuffer($name)
     {
-        $pending = $this->GetPending();
-        $now = time();
-
-        if (isset($pending[$ident])) {
-            $p = $pending[$ident];
-            $deadline = isset($p['deadline']) ? (int)$p['deadline'] : 0;
-            $desired  = isset($p['desired']) ? $p['desired'] : null;
-
-            if ($deadline > 0 && $now <= $deadline) {
-                if ($this->Matches($polledValue, $desired, $epsilon)) {
-                    unset($pending[$ident]);
-                    $this->SetBuffer('Pending', json_encode($pending));
-                    $this->SetValue($ident, $polledValue);
-                } else {
-                    return;
-                }
-            } else {
-                unset($pending[$ident]);
-                $this->SetBuffer('Pending', json_encode($pending));
-                $this->SetValue($ident, $polledValue);
-            }
-        } else {
-            $this->SetValue($ident, $polledValue);
-        }
-    }
-
-    private function SetPending($ident, $desired)
-    {
-        $pending = $this->GetPending();
-        $pending[$ident] = array(
-            'desired'  => $desired,
-            'deadline' => time() + 10
-        );
-        $this->SetBuffer('Pending', json_encode($pending));
-    }
-
-    private function GetPending()
-    {
-        $raw = $this->GetBuffer('Pending');
+        $raw = $this->GetBuffer($name);
         $arr = json_decode($raw, true);
         if (!is_array($arr)) $arr = array();
         return $arr;
-    }
-
-    private function Matches($a, $b, $epsilon)
-    {
-        if ($b === null) return false;
-        if ($epsilon <= 0) return ((string)$a === (string)$b);
-        return abs((float)$a - (float)$b) <= (float)$epsilon;
     }
 }

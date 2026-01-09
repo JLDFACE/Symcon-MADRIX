@@ -12,7 +12,6 @@ class MadrixDeck extends IPSModule
         $this->RegisterPropertyInteger('Storage', 1);
 
         $this->SetBuffer('Pending', json_encode(array()));
-        $this->SetBuffer('LastAssocPlace', '0');
         $this->SetBuffer('DescCache', json_encode(array())); // place(string) => desc
 
         $this->EnsureProfiles();
@@ -43,12 +42,13 @@ class MadrixDeck extends IPSModule
             if (IPS_GetName($svid) != $sname) IPS_SetName($svid, $sname);
         }
 
-        // Storage-Änderung sofort wirksam: aktuellen Place erneut schreiben
         $place = $this->GetVarIntByIdent('Place', 1);
         $storage = $this->GetStorage();
-        $this->SendToParent('SetDeckPlace', array('deck' => $deck, 'storage' => $storage, 'place' => $place));
 
-        // Association initial aus Cache oder Fallback
+        $this->SendToParent('SetDeckPlace', array('deck' => $deck, 'storage' => $storage, 'place' => $place));
+        $this->SendToParent('PushStorageMeta', array('storage' => $storage));
+        $this->SendToParent('ResolvePlaceMeta', array('storage' => $storage, 'place' => $place));
+
         $this->UpdatePlaceAssociation($place, '');
     }
 
@@ -62,12 +62,13 @@ class MadrixDeck extends IPSModule
             $this->SetValue('Place', $place);
             $this->SetPending('Place', $place, 10);
 
-            // sofort UI-Label setzen (aus Cache wenn vorhanden)
             $this->UpdatePlaceAssociation($place, '');
 
             $deck = $this->GetDeck();
             $storage = $this->GetStorage();
+
             $this->SendToParent('SetDeckPlace', array('deck' => $deck, 'storage' => $storage, 'place' => $place));
+            $this->SendToParent('ResolvePlaceMeta', array('storage' => $storage, 'place' => $place));
             return;
         }
 
@@ -90,8 +91,38 @@ class MadrixDeck extends IPSModule
         $data = json_decode($JSONString, true);
         if (!is_array($data)) return;
         if (!isset($data['DataID']) || $data['DataID'] != $this->DataID) return;
-        if (!isset($data['type']) || $data['type'] != 'status') return;
+        if (!isset($data['type'])) return;
 
+        if ($data['type'] == 'place_meta') {
+            $storage = isset($data['storage']) ? (int)$data['storage'] : 0;
+            $place = isset($data['place']) ? (int)$data['place'] : 0;
+            $desc = isset($data['desc']) ? (string)$data['desc'] : '';
+
+            if ($storage == $this->GetStorage() && $place > 0) {
+                $this->UpdatePlaceAssociation($place, $desc);
+            }
+            return;
+        }
+
+        if ($data['type'] == 'place_meta_bulk') {
+            $storage = isset($data['storage']) ? (int)$data['storage'] : 0;
+            if ($storage != $this->GetStorage()) return;
+
+            $items = isset($data['items']) ? $data['items'] : null;
+            if (!is_array($items)) return;
+
+            foreach ($items as $it) {
+                if (!is_array($it)) continue;
+                $place = isset($it['place']) ? (int)$it['place'] : 0;
+                $desc = isset($it['desc']) ? (string)$it['desc'] : '';
+                if ($place > 0) {
+                    $this->UpdatePlaceAssociation($place, $desc);
+                }
+            }
+            return;
+        }
+
+        if ($data['type'] != 'status') return;
         if (!isset($data['decks']) || !is_array($data['decks'])) return;
 
         $myDeck = $this->GetDeck();
@@ -108,8 +139,6 @@ class MadrixDeck extends IPSModule
             if ($place !== null) $this->ApplyPolledWithPending('Place', $place, 0);
             if ($speed !== null) $this->ApplyPolledWithPending('Speed', $speed, 0.05);
 
-            // Desc kommt oft nur bei slow/forceNames oder Place-Wechsel.
-            // WICHTIG: Wenn desc leer ist, NICHT überschreiben => Cache/alter Text bleibt.
             if ($place !== null) {
                 $this->UpdatePlaceAssociation($place, $desc);
             }
@@ -149,11 +178,9 @@ class MadrixDeck extends IPSModule
 
         $t = trim((string)$desc);
         if ($t !== '') {
-            // Cache aktualisieren
             $cache[(string)$place] = $t;
             $this->SetDescCache($cache);
         } else {
-            // Nur verwenden, wenn im Cache vorhanden – sonst NICHT "runterstufen"
             if (isset($cache[(string)$place])) {
                 $t = (string)$cache[(string)$place];
             }
@@ -164,14 +191,7 @@ class MadrixDeck extends IPSModule
             $label .= ' "' . $t . '"';
         }
 
-        // vorherigen Association-Eintrag neutralisieren, aber nur wenn wir wirklich umschalten
-        $last = (int)$this->GetBuffer('LastAssocPlace');
-        if ($last > 0 && $last != $place) {
-            IPS_SetVariableProfileAssociation($pp, $last, (string)$last, '', 0);
-        }
-
         IPS_SetVariableProfileAssociation($pp, $place, $label, '', 0);
-        $this->SetBuffer('LastAssocPlace', (string)$place);
     }
 
     private function GetDescCache()

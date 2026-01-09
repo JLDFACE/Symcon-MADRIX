@@ -5,14 +5,20 @@
       "name": "Deck",
       "caption": "Deck",
       "options": [
-        { "caption": "A", "value": "A" },
-        { "caption": "B", "value": "B" }
+        {
+          "caption": "A",
+          "value": "A"
+        },
+        {
+          "caption": "B",
+          "value": "B"
+        }
       ]
     },
     {
       "type": "NumberSpinner",
       "name": "Storage",
-      "caption": "Storage (Sx) für Place-Namen",
+      "caption": "Storage (1..256)",
       "minimum": 1,
       "maximum": 256
     }
@@ -20,7 +26,7 @@
   "actions": [
     {
       "type": "Label",
-      "caption": "Place-Variablenname wird dynamisch gesetzt: Deck A Place: 1 \"Intro\""
+      "caption": "Place-Namen werden gecached und als Profil-Labels für belegte Places angezeigt (Scan im Controller)."
     }
   ]
 }
