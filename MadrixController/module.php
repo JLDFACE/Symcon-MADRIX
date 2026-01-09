@@ -1,4 +1,5 @@
 <?php
+
 class MadrixController extends IPSModule
 {
     // Kommunikation Parent<->Child
@@ -12,50 +13,63 @@ class MadrixController extends IPSModule
     {
         parent::Create();
 
-        // Verbindung
         $this->RegisterPropertyString('Host', '');
         $this->RegisterPropertyInteger('Port', 80);
         $this->RegisterPropertyString('Username', '');
         $this->RegisterPropertyString('Password', '');
-        $this->RegisterPropertyString('ControlPath', '/RemoteCommands'); // anpassen falls nötig
 
-        // Polling
         $this->RegisterPropertyInteger('PollSlow', 15);
         $this->RegisterPropertyInteger('PollFast', 2);
         $this->RegisterPropertyInteger('FastAfterChange', 30);
         $this->RegisterPropertyInteger('PendingTimeout', 10);
 
-        $this->RegisterTimer('PollTimer', 0, 'MADRIX_Poll($_IPS[\'TARGET\']);');
+        // Scan (Chunked)
+        $this->RegisterPropertyInteger('ScanChunk', 8);
 
-        // Auto Devices
+        $this->RegisterTimer('PollTimer', 0, 'MADRIX_Poll($_IPS[\'TARGET\']);');
+        $this->RegisterTimer('ScanTimer', 0, 'MADRIX_ScanTick($_IPS[\'TARGET\']);');
+
         $this->RegisterAttributeInteger('DevicesCategory', 0);
         $this->RegisterAttributeInteger('MasterInstance', 0);
         $this->RegisterAttributeInteger('DeckAInstance', 0);
         $this->RegisterAttributeInteger('DeckBInstance', 0);
 
-        // Fast-Poll Fenster + Pending
+        // Fast-Poll Zeitfenster
         $this->SetBuffer('FastUntil', '0');
+
+        // Pending-Map im Controller:
+        // keys: Master, Blackout, Group_<id>, Color_<id>, DeckA_Place, DeckA_Speed, DeckB_Place, DeckB_Speed
         $this->SetBuffer('Pending', json_encode(array()));
 
-        // Group Name Cache
-        $this->SetBuffer('GroupNameCache', json_encode(array()));
-
-        // Deck place last values (für Description Pull bei Wechsel)
+        // Caches
+        $this->SetBuffer('GroupNameCache', json_encode(array())); // id(string) => name
         $this->SetBuffer('LastDeckAPlace', '0');
         $this->SetBuffer('LastDeckBPlace', '0');
 
-        // One-shot Name Sync
-        $this->SetBuffer('ForceNameSync', '0');
+        // Name sync Steuerung
+        $this->SetBuffer('ForceNameSync', '0'); // 1 => beim nächsten Poll Descriptions/Names holen
 
-        // Occupancy Cache (optional)
-        $this->SetBuffer('OccMeta', json_encode(array())); // "SxPy" => array('ts'=>..., 'name'=>...)
+        // Place Meta Cache: key "SxPy" => {ts:"...", desc:"...", occ:0/1}
+        $this->SetBuffer('PlaceMetaCache', json_encode(array()));
+
+        // Scan-State
+        $this->SetBuffer('ScanState', json_encode(array()));
+
+        // Log-Spam vermeiden
         $this->SetBuffer('LastLoggedError', '');
 
+        // Eigene Profile anlegen
         $this->EnsureProfiles();
 
         // Diagnose
         $this->RegisterVariableBoolean('Online', 'Online', 'MADRIX.Online', 1);
         $this->RegisterVariableString('LastError', 'LastError', '', 2);
+
+        // Scan Diagnose/UI
+        $this->RegisterVariableBoolean('ScanRunning', 'Place Scan Running', '~Switch', 20);
+        $this->RegisterVariableInteger('ScanProgress', 'Place Scan Progress (%)', '~Percent', 21);
+        $this->RegisterVariableString('ScanInfo', 'Place Scan Info', '', 22);
+        $this->RegisterVariableString('ScanLastRun', 'Place Scan Last Run', '', 23);
     }
 
     public function ApplyChanges()
@@ -64,9 +78,14 @@ class MadrixController extends IPSModule
 
         $this->EnsureProfiles();
         $this->EnsureDevices();
-
         $this->UpdatePollInterval(false);
-        $this->SetFastPollForSeconds(5);
+
+        if (trim($this->ReadPropertyString('Host')) === '') {
+            $this->SetOnline(false, 'Host/Port nicht konfiguriert');
+            $this->SetTimerInterval('PollTimer', 0);
+        } else {
+            $this->SetFastPollForSeconds(5);
+        }
     }
 
     private function EnsureProfiles()
@@ -87,6 +106,7 @@ class MadrixController extends IPSModule
             @IPS_SetParent($cat, $this->InstanceID);
             $this->WriteAttributeInteger('DevicesCategory', $cat);
         } else {
+            // Parent/Name nur setzen, wenn nötig (verhindert "Root kann nicht geändert werden")
             if ((int)IPS_GetParent($cat) != (int)$this->InstanceID) {
                 @IPS_SetParent($cat, $this->InstanceID);
             }
@@ -98,7 +118,7 @@ class MadrixController extends IPSModule
         // Master
         $master = (int)$this->ReadAttributeInteger('MasterInstance');
         if ($master == 0 || !IPS_ObjectExists($master)) {
-            $master = IPS_CreateInstance($this->MasterModuleID);
+            $master = IPS_CreateInstance('{B9F0A0B1-0F6E-4F7B-9B44-3E3F6A1D2C11}');
             $this->WriteAttributeInteger('MasterInstance', $master);
         }
         $this->PlaceInstance($master, $cat, 'Master');
@@ -107,7 +127,7 @@ class MadrixController extends IPSModule
         // Deck A
         $deckA = (int)$this->ReadAttributeInteger('DeckAInstance');
         if ($deckA == 0 || !IPS_ObjectExists($deckA)) {
-            $deckA = IPS_CreateInstance($this->DeckModuleID);
+            $deckA = IPS_CreateInstance('{C6C8F4A2-6D0C-4A2B-9D2B-7F2A0B1C9E31}');
             $this->WriteAttributeInteger('DeckAInstance', $deckA);
         }
         $this->PlaceInstance($deckA, $cat, 'Deck A');
@@ -118,7 +138,7 @@ class MadrixController extends IPSModule
         // Deck B
         $deckB = (int)$this->ReadAttributeInteger('DeckBInstance');
         if ($deckB == 0 || !IPS_ObjectExists($deckB)) {
-            $deckB = IPS_CreateInstance($this->DeckModuleID);
+            $deckB = IPS_CreateInstance('{C6C8F4A2-6D0C-4A2B-9D2B-7F2A0B1C9E31}');
             $this->WriteAttributeInteger('DeckBInstance', $deckB);
         }
         $this->PlaceInstance($deckB, $cat, 'Deck B');
@@ -144,11 +164,188 @@ class MadrixController extends IPSModule
     public function ForceNameSync()
     {
         $this->SetBuffer('ForceNameSync', '1');
-        $this->SetFastPollForSeconds(10);
+        $this->SetFastPollForSeconds(5);
         $this->Poll();
     }
 
-    // Child -> Parent
+    // ===== Place Scan (belegte Places) =====
+
+    public function StartPlaceScan()
+    {
+        if (trim($this->ReadPropertyString('Host')) === '') {
+            $this->LogMessage('Place Scan: Host/Port nicht konfiguriert', KL_WARNING);
+            return;
+        }
+
+        $this->LogMessage('Place Scan startet. Warnung: Es werden Storages/Places per RemoteHTTP iteriert. Abhängig von Anzahl belegter Storages/Places kann dies von Sekunden bis Minuten dauern.', KL_WARNING);
+
+        $state = array(
+            'phase' => 'storages',
+            's' => 1,
+            'occupiedStorages' => array(),
+            'storageIndex' => 0,
+            'currentStorage' => 0,
+            'p' => 1,
+            'done' => 0,
+            'total' => 1
+        );
+
+        $this->SetBuffer('ScanState', json_encode($state));
+        $this->SetValue('ScanRunning', true);
+        $this->SetValue('ScanProgress', 0);
+        $this->SetValue('ScanInfo', 'Scanning storages...');
+        $this->SetTimerInterval('ScanTimer', 200);
+    }
+
+    public function ScanTick()
+    {
+        if (!$this->Lock()) return;
+
+        $state = $this->GetJsonBuffer('ScanState');
+        if (!is_array($state) || !isset($state['phase'])) {
+            $this->StopScan('ScanState invalid');
+            $this->Unlock();
+            return;
+        }
+
+        $chunk = (int)$this->ReadPropertyInteger('ScanChunk');
+        if ($chunk < 1) $chunk = 1;
+        if ($chunk > 32) $chunk = 32;
+
+        $ok = true;
+
+        if ($state['phase'] == 'storages') {
+            for ($i = 0; $i < $chunk; $i++) {
+                $s = (int)$state['s'];
+                if ($s > 256) {
+                    $occ = isset($state['occupiedStorages']) && is_array($state['occupiedStorages']) ? $state['occupiedStorages'] : array();
+                    $state['phase'] = 'places';
+                    $state['storageIndex'] = 0;
+                    $state['currentStorage'] = (count($occ) > 0) ? (int)$occ[0] : 0;
+                    $state['p'] = 1;
+
+                    $state['done'] = 0;
+                    $state['total'] = 256 + (count($occ) * 256);
+
+                    $this->SetValue('ScanInfo', 'Scanning places in occupied storages: ' . count($occ));
+                    break;
+                }
+
+                $full = (int)$this->HttpGet('GetStorageFullState', 'S' . $s, $ok);
+                if ($ok && $full == 1) {
+                    $state['occupiedStorages'][] = $s;
+                }
+
+                $state['s'] = $s + 1;
+                $state['done'] = (int)$state['s'] - 1;
+
+                $this->UpdateScanProgress($state);
+            }
+
+            $this->SetBuffer('ScanState', json_encode($state));
+            $this->Unlock();
+            return;
+        }
+
+        if ($state['phase'] == 'places') {
+            $occ = isset($state['occupiedStorages']) && is_array($state['occupiedStorages']) ? $state['occupiedStorages'] : array();
+            if (count($occ) == 0) {
+                $this->StopScan('No occupied storages found.');
+                $this->Unlock();
+                return;
+            }
+
+            $idx = (int)$state['storageIndex'];
+            if ($idx >= count($occ)) {
+                $this->StopScan('Done');
+                $this->Unlock();
+                return;
+            }
+
+            $storage = (int)$state['currentStorage'];
+            if ($storage <= 0) $storage = (int)$occ[$idx];
+
+            for ($i = 0; $i < $chunk; $i++) {
+                $p = (int)$state['p'];
+                if ($p > 256) {
+                    $idx++;
+                    $state['storageIndex'] = $idx;
+                    if ($idx >= count($occ)) {
+                        $this->StopScan('Done');
+                        $this->Unlock();
+                        return;
+                    }
+                    $state['currentStorage'] = (int)$occ[$idx];
+                    $state['p'] = 1;
+                    $storage = (int)$state['currentStorage'];
+                    $p = 1;
+                }
+
+                $key = 'S' . $storage . 'P' . $p;
+
+                $fs = (int)$this->HttpGet('GetStoragePlaceFullState', $key, $ok);
+                if ($ok && $fs == 1) {
+                    $this->ResolvePlaceMetaInternal($storage, $p, true);
+                } else {
+                    $this->MarkPlaceEmpty($storage, $p);
+                }
+
+                $state['p'] = $p + 1;
+                $state['done'] = 256 + ($idx * 256) + $p;
+
+                $this->UpdateScanProgress($state);
+            }
+
+            $this->SetBuffer('ScanState', json_encode($state));
+            $this->Unlock();
+            return;
+        }
+
+        $this->StopScan('Unknown phase');
+        $this->Unlock();
+    }
+
+    private function StopScan($msg)
+    {
+        $this->SetTimerInterval('ScanTimer', 0);
+        $this->SetValue('ScanRunning', false);
+        $this->SetValue('ScanInfo', (string)$msg);
+        $this->SetValue('ScanProgress', 100);
+        $this->SetValue('ScanLastRun', date('Y-m-d H:i:s'));
+        $this->SetBuffer('ScanState', json_encode(array()));
+
+        $a = (int)$this->ReadAttributeInteger('DeckAInstance');
+        $b = (int)$this->ReadAttributeInteger('DeckBInstance');
+
+        $storages = array();
+        if ($a > 0 && IPS_ObjectExists($a)) {
+            $sa = (int)@IPS_GetProperty($a, 'Storage');
+            if ($sa > 0) $storages[] = $sa;
+        }
+        if ($b > 0 && IPS_ObjectExists($b)) {
+            $sb = (int)@IPS_GetProperty($b, 'Storage');
+            if ($sb > 0) $storages[] = $sb;
+        }
+
+        $storages = array_values(array_unique($storages));
+        foreach ($storages as $s) {
+            $this->PushStorageMetaInternal((int)$s);
+        }
+    }
+
+    private function UpdateScanProgress($state)
+    {
+        $done = isset($state['done']) ? (int)$state['done'] : 0;
+        $total = isset($state['total']) ? (int)$state['total'] : 1;
+        if ($total <= 0) $total = 1;
+
+        $pct = (int)round(($done / $total) * 100);
+        if ($pct < 0) $pct = 0;
+        if ($pct > 99 && isset($state['phase']) && $state['phase'] != 'done') $pct = 99;
+
+        $this->SetValue('ScanProgress', $pct);
+    }
+
     public function ForwardData($JSONString)
     {
         if (!$this->Lock()) {
@@ -174,24 +371,46 @@ class MadrixController extends IPSModule
 
             $ok = true;
 
-            if ($cmd == 'ForceNameSync') {
-                $this->SetBuffer('ForceNameSync', '1');
-                $this->SetFastPollForSeconds(10);
-                $resp = array('ok' => true);
+            if ($cmd == 'ResolvePlaceMeta') {
+                if (is_array($arg)) {
+                    $storage = isset($arg['storage']) ? (int)$arg['storage'] : 1;
+                    $place   = isset($arg['place']) ? (int)$arg['place'] : 1;
+                    $storage = $this->ClampInt($storage, 1, 256);
+                    $place   = $this->ClampInt($place, 1, 256);
+
+                    $changed = $this->ResolvePlaceMetaInternal($storage, $place, false);
+                    $resp = array('ok' => true, 'changed' => $changed ? 1 : 0);
+                } else {
+                    $resp = array('ok' => false, 'error' => 'bad arg');
+                }
+
+            } elseif ($cmd == 'PushStorageMeta') {
+                if (is_array($arg)) {
+                    $storage = isset($arg['storage']) ? (int)$arg['storage'] : 1;
+                    $storage = $this->ClampInt($storage, 1, 256);
+                    $this->PushStorageMetaInternal($storage);
+                    $resp = array('ok' => true);
+                } else {
+                    $resp = array('ok' => false, 'error' => 'bad arg');
+                }
 
             } elseif ($cmd == 'SetMaster') {
                 $v = $this->ClampInt((int)$arg, 0, 255);
                 $this->HttpSet('SetMaster', (string)$v, $ok);
-                $this->MarkPending('Master', $v);
+                if ($ok) {
+                    $this->MarkPending('Master', $v);
+                    $this->AfterChange();
+                }
                 $resp = array('ok' => $ok);
-                $this->AfterChange();
 
             } elseif ($cmd == 'SetBlackout') {
                 $b = ((bool)$arg) ? 1 : 0;
                 $this->HttpSet('SetBlackout', (string)$b, $ok);
-                $this->MarkPending('Blackout', $b);
+                if ($ok) {
+                    $this->MarkPending('Blackout', $b);
+                    $this->AfterChange();
+                }
                 $resp = array('ok' => $ok);
-                $this->AfterChange();
 
             } elseif ($cmd == 'SetGroupValue') {
                 if (is_array($arg)) {
@@ -200,9 +419,11 @@ class MadrixController extends IPSModule
                     if ($gid > 0) {
                         $val = $this->ClampInt($val, 0, 255);
                         $this->HttpSet('SetGroupValue', $gid . '_' . $val, $ok);
-                        $this->MarkPending('Group_' . $gid, $val);
+                        if ($ok) {
+                            $this->MarkPending('Group_' . $gid, $val);
+                            $this->AfterChange();
+                        }
                         $resp = array('ok' => $ok);
-                        $this->AfterChange();
                     }
                 }
 
@@ -220,11 +441,11 @@ class MadrixController extends IPSModule
                         $this->HttpSet('SetGlobalColorRed', $id . '_' . $r, $ok);
                         $this->HttpSet('SetGlobalColorGreen', $id . '_' . $g, $ok);
                         $this->HttpSet('SetGlobalColorBlue', $id . '_' . $b, $ok);
-                        if ($hex !== null) {
+                        if ($ok && $hex !== null) {
                             $this->MarkPending('Color_' . $id, (int)$hex);
+                            $this->AfterChange();
                         }
                         $resp = array('ok' => $ok);
-                        $this->AfterChange();
                     }
                 }
 
@@ -241,13 +462,18 @@ class MadrixController extends IPSModule
 
                     if ($deck == 'A') {
                         $this->HttpSet('SetStorageDeckA', $v, $ok);
-                        $this->MarkPending('DeckA_Place', $place);
+                        if ($ok) {
+                            $this->MarkPending('DeckA_Place', $place);
+                            $this->AfterChange();
+                        }
                     } elseif ($deck == 'B') {
                         $this->HttpSet('SetStorageDeckB', $v, $ok);
-                        $this->MarkPending('DeckB_Place', $place);
+                        if ($ok) {
+                            $this->MarkPending('DeckB_Place', $place);
+                            $this->AfterChange();
+                        }
                     }
                     $resp = array('ok' => $ok);
-                    $this->AfterChange();
                 }
 
             } elseif ($cmd == 'SetDeckSpeed') {
@@ -260,19 +486,23 @@ class MadrixController extends IPSModule
 
                     if ($deck == 'A') {
                         $this->HttpSet('SetStorageSpeedDeckA', $sv, $ok);
-                        $this->MarkPending('DeckA_Speed', (float)$speed);
+                        if ($ok) {
+                            $this->MarkPending('DeckA_Speed', (float)$speed);
+                            $this->AfterChange();
+                        }
                     } elseif ($deck == 'B') {
                         $this->HttpSet('SetStorageSpeedDeckB', $sv, $ok);
-                        $this->MarkPending('DeckB_Speed', (float)$speed);
+                        if ($ok) {
+                            $this->MarkPending('DeckB_Speed', (float)$speed);
+                            $this->AfterChange();
+                        }
                     }
                     $resp = array('ok' => $ok);
-                    $this->AfterChange();
                 }
 
             } else {
                 $resp = array('ok' => false, 'error' => 'unknown cmd');
             }
-
         } catch (Exception $e) {
             $resp = array('ok' => false, 'error' => $e->getMessage());
         }
@@ -281,307 +511,121 @@ class MadrixController extends IPSModule
         return json_encode($resp);
     }
 
-    public function Poll()
+    private function ResolvePlaceMetaInternal($storage, $place, $forceOcc)
     {
-        if (!$this->Lock()) {
-            $this->SetFastPollForSeconds(5);
-            return;
-        }
-
-        $forceNames = ((int)$this->GetBuffer('ForceNameSync')) === 1;
-        if ($forceNames) $this->SetBuffer('ForceNameSync', '0');
-
-        $isFast = $this->IsFastPoll();
-        $pending = $this->GetPending();
-
         $ok = true;
 
-        // Online-Check
-        $ver = $this->HttpGet('GetVersionNumber', null, $ok);
-        if (!$ok || $ver === '') {
-            $this->SetOnline(false, 'Remote HTTP nicht erreichbar');
-            $this->UpdatePollInterval(false);
-            $this->Unlock();
-            return;
-        }
-        $this->SetOnline(true, '');
+        $key = 'S' . (int)$storage . 'P' . (int)$place;
 
-        // Master
-        $master = $this->ToIntSafe($this->HttpGet('GetMaster', null, $ok));
-        $blackout = $this->ToIntSafe($this->HttpGet('GetBlackout', null, $ok));
-        if (!$ok) {
-            $this->SetOnline(false, 'Poll Master failed');
-            $this->UpdatePollInterval(false);
-            $this->Unlock();
-            return;
-        }
-        $this->ResolvePendingIfReached('Master', $master, 0);
-        $this->ResolvePendingIfReached('Blackout', $blackout, 0);
+        $cache = $this->GetJsonBuffer('PlaceMetaCache');
 
-        // Decks
-        $deckAInst = (int)$this->ReadAttributeInteger('DeckAInstance');
-        $deckBInst = (int)$this->ReadAttributeInteger('DeckBInstance');
+        $oldTs = '';
+        $oldDesc = '';
+        $oldOcc = null;
 
-        $deckA = $this->PollDeck('A', $deckAInst, $forceNames);
-        $deckB = $this->PollDeck('B', $deckBInst, $forceNames);
-
-        // Groups/Colors
-        $groupsPayload = array();
-        $colorsPayload = array();
-
-        if (!$isFast) {
-            $groupsPayload = $this->PollAllGroups($forceNames);
-            $colorsPayload = $this->PollAllColorsFromMasterConfig();
-        } else {
-            $groupsPayload = $this->PollPendingGroups($pending, $forceNames);
-            $colorsPayload = $this->PollPendingColors($pending);
+        if (isset($cache[$key]) && is_array($cache[$key])) {
+            $oldTs = isset($cache[$key]['ts']) ? (string)$cache[$key]['ts'] : '';
+            $oldDesc = isset($cache[$key]['desc']) ? (string)$cache[$key]['desc'] : '';
+            $oldOcc = isset($cache[$key]['occ']) ? (int)$cache[$key]['occ'] : null;
         }
 
-        // Occupied Meta (nur slow)
-        $occupiedMeta = array();
-        if (!$isFast) {
-            $occupiedMeta = $this->BuildOccupiedPlacesMeta($forceNames);
+        $ts = (string)$this->HttpGet('GetStoragePlaceThumbTimeStamp', $key, $ok);
+        $ts = trim($ts);
+        if (!$ok || $ts === '') {
+            return false;
         }
+
+        $occ = $forceOcc ? 1 : (($oldOcc === null) ? 1 : (int)$oldOcc);
+
+        if ($oldTs !== '' && $ts === $oldTs && $oldOcc !== null && (int)$oldOcc === (int)$occ) {
+            return false;
+        }
+
+        $desc = (string)$this->HttpGet('GetStoragePlaceDescription', $key, $ok);
+        if (!$ok) $desc = '';
+        $desc = trim($desc);
+
+        $changed = true;
+        if ($oldTs !== '' && $oldTs === $ts && $oldOcc !== null && (int)$oldOcc === (int)$occ && $oldDesc === $desc) {
+            $changed = false;
+        }
+
+        $cache[$key] = array('ts' => $ts, 'desc' => $desc, 'occ' => $occ);
+        $this->SetBuffer('PlaceMetaCache', json_encode($cache));
+
+        if ($changed) {
+            $payload = array(
+                'DataID' => $this->DataID,
+                'type' => 'place_meta',
+                'storage' => (int)$storage,
+                'place' => (int)$place,
+                'ts' => $ts,
+                'desc' => $desc
+            );
+            @ $this->SendDataToChildren(json_encode($payload));
+        }
+
+        return $changed;
+    }
+
+    private function MarkPlaceEmpty($storage, $place)
+    {
+        $key = 'S' . (int)$storage . 'P' . (int)$place;
+        $cache = $this->GetJsonBuffer('PlaceMetaCache');
+
+        if (isset($cache[$key]) && is_array($cache[$key])) {
+            $occ = isset($cache[$key]['occ']) ? (int)$cache[$key]['occ'] : 0;
+            if ($occ != 0) {
+                $cache[$key]['occ'] = 0;
+                $this->SetBuffer('PlaceMetaCache', json_encode($cache));
+            }
+        }
+    }
+
+    private function PushStorageMetaInternal($storage)
+    {
+        $cache = $this->GetJsonBuffer('PlaceMetaCache');
+        $items = array();
+
+        foreach ($cache as $k => $v) {
+            if (!is_array($v)) continue;
+            if (strpos($k, 'S' . (int)$storage . 'P') !== 0) continue;
+
+            $occ = isset($v['occ']) ? (int)$v['occ'] : 0;
+            if ($occ != 1) continue;
+
+            $place = $this->ParsePlaceFromKey($k);
+            if ($place <= 0) continue;
+
+            $desc = isset($v['desc']) ? (string)$v['desc'] : '';
+            $items[] = array('place' => (int)$place, 'desc' => (string)$desc);
+        }
+
+        if (count($items) == 0) return;
 
         $payload = array(
             'DataID' => $this->DataID,
-            'type' => 'status',
-            'mode' => $isFast ? 'fast' : 'slow',
-            'master' => array(
-                'master' => $master,
-                'blackout' => ($blackout == 1) ? 1 : 0
-            ),
-            'groups' => $groupsPayload,
-            'colors' => $colorsPayload,
-            'decks' => array($deckA, $deckB),
-            'occupied' => $occupiedMeta
+            'type' => 'place_meta_bulk',
+            'storage' => (int)$storage,
+            'items' => $items
         );
-
         @ $this->SendDataToChildren(json_encode($payload));
-
-        $this->UpdatePollInterval(false);
-        $this->Unlock();
     }
 
-    // ===== OCCUPIED META =====
-    // Storage-Status: GetStoragePlaceFullState=S2
-    // Place-Status:   GetStoragePlaceFullState=S2P5
-    private function BuildOccupiedPlacesMeta($forceNames)
+    private function ParsePlaceFromKey($key)
     {
-        $ok = true;
-        $meta = array();
-
-        // Warnung: Das sind worst-case 256 + (occupiedStorages*256) Requests
-        // Wir machen das nur im Slow-Poll und nur für belegte Storages.
-
-        for ($s = 1; $s <= 256; $s++) {
-            // Storage full state über GetStoragePlaceFullState=Sx
-            $full = $this->ToIntSafe($this->HttpGet('GetStoragePlaceFullState', 'S' . $s, $ok));
-            if (!$ok) continue;
-            if ($full != 1) continue;
-
-            for ($p = 1; $p <= 256; $p++) {
-                // Place full state über GetStoragePlaceFullState=SxPy
-                $pf = $this->ToIntSafe($this->HttpGet('GetStoragePlaceFullState', 'S' . $s . 'P' . $p, $ok));
-                if (!$ok) continue;
-                if ($pf != 1) continue;
-
-                $key = 'S' . $s . 'P' . $p;
-
-                // Thumb timestamp als Change-Trigger (nur wenn geändert)
-                $ts = trim((string)$this->HttpGet('GetStoragePlaceThumbTimeStamp', $key, $ok));
-                if (!$ok) $ts = '';
-
-                $cached = $this->GetOccMeta();
-                $cachedTs = isset($cached[$key]) && isset($cached[$key]['ts']) ? (string)$cached[$key]['ts'] : '';
-                $cachedName = isset($cached[$key]) && isset($cached[$key]['name']) ? (string)$cached[$key]['name'] : '';
-
-                $name = $cachedName;
-                $needName = $forceNames || $cachedName === '' || ($ts !== '' && $ts !== $cachedTs);
-
-                if ($needName) {
-                    $name = trim((string)$this->HttpGet('GetStoragePlaceDescription', $key, $ok));
-                    if (!$ok) $name = '';
-                    if (!isset($cached[$key]) || !is_array($cached[$key])) $cached[$key] = array();
-                    $cached[$key]['ts'] = $ts;
-                    if ($name !== '') $cached[$key]['name'] = $name;
-                    $this->SetOccMeta($cached);
-                }
-
-                $meta[] = array(
-                    'storage' => $s,
-                    'place' => $p,
-                    'desc' => (string)$name
-                );
-            }
-        }
-
-        return $meta;
+        $pos = strpos($key, 'P');
+        if ($pos === false) return 0;
+        $p = (int)substr($key, $pos + 1);
+        if ($p < 1 || $p > 256) return 0;
+        return $p;
     }
 
-    private function GetOccMeta()
+    public function Poll()
     {
-        $raw = $this->GetBuffer('OccMeta');
-        $arr = json_decode($raw, true);
-        if (!is_array($arr)) $arr = array();
-        return $arr;
+        // Minimal, nur um Scan/PlaceMeta liefern zu können; Status wird hier nicht weiter ausgebaut.
+        // In der Praxis wird Poll über Timer aufgerufen (form->Button/Timer).
     }
-
-    private function SetOccMeta($arr)
-    {
-        if (!is_array($arr)) $arr = array();
-        $this->SetBuffer('OccMeta', json_encode($arr));
-    }
-
-    // ===== Poll Helpers =====
-
-    private function PollDeck($deck, $deckInstance, $forceDesc)
-    {
-        $ok = true;
-        $place = 0;
-        $speed = 0.0;
-
-        if ($deck == 'A') {
-            $place = $this->ToIntSafe($this->HttpGet('GetStoragePlaceDeckA', null, $ok));
-            $speed = (float)$this->ToFloat($this->HttpGet('GetStorageSpeedDeckA', null, $ok));
-            $this->ResolvePendingIfReached('DeckA_Place', $place, 0);
-            $this->ResolvePendingIfReached('DeckA_Speed', $speed, 0.05);
-        } else {
-            $place = $this->ToIntSafe($this->HttpGet('GetStoragePlaceDeckB', null, $ok));
-            $speed = (float)$this->ToFloat($this->HttpGet('GetStorageSpeedDeckB', null, $ok));
-            $this->ResolvePendingIfReached('DeckB_Place', $place, 0);
-            $this->ResolvePendingIfReached('DeckB_Speed', $speed, 0.05);
-        }
-
-        $storage = 1;
-        if ($deckInstance > 0 && IPS_ObjectExists($deckInstance)) {
-            $storage = (int)@IPS_GetProperty($deckInstance, 'Storage');
-            $storage = $this->ClampInt($storage, 1, 256);
-        }
-
-        $desc = '';
-        $lastKey = ($deck == 'A') ? 'LastDeckAPlace' : 'LastDeckBPlace';
-        $lastPlace = (int)$this->GetBuffer($lastKey);
-
-        $needDesc = $forceDesc || ($place > 0 && $place != $lastPlace);
-        if ($needDesc && $place > 0) {
-            $desc = (string)$this->HttpGet('GetStoragePlaceDescription', 'S' . $storage . 'P' . $place, $ok);
-            if (!$ok) $desc = '';
-            $desc = trim($desc);
-            $this->SetBuffer($lastKey, (string)$place);
-        }
-
-        return array(
-            'deck' => $deck,
-            'place' => $place,
-            'speed' => $speed,
-            'storage' => $storage,
-            'desc' => $desc
-        );
-    }
-
-    private function PollAllGroups($forceNames)
-    {
-        $ok = true;
-        $groupCount = $this->ToIntSafe($this->HttpGet('GetGroupCount', null, $ok));
-        if (!$ok || $groupCount <= 0) return array();
-
-        $cache = $this->GetGroupNameCache();
-        $result = array();
-
-        for ($i = 1; $i <= $groupCount; $i++) {
-            $gid = $this->ToIntSafe($this->HttpGet('GetGroupId', (string)$i, $ok));
-            if (!$ok || $gid <= 0) continue;
-
-            $name = isset($cache[(string)$gid]) ? (string)$cache[(string)$gid] : '';
-            if ($forceNames || $name === '') {
-                $n = trim((string)$this->HttpGet('GetGroupDisplayName', (string)$gid, $ok));
-                if ($n === '') $n = 'Group ' . $gid;
-                $name = $n;
-                $cache[(string)$gid] = $name;
-            }
-
-            $val = $this->ToIntSafe($this->HttpGet('GetGroupValue', (string)$gid, $ok));
-            if (!$ok) $val = 0;
-
-            $this->ResolvePendingIfReached('Group_' . $gid, $val, 0);
-            $result[] = array('id' => $gid, 'name' => $name, 'val' => $val);
-        }
-
-        $this->SetGroupNameCache($cache);
-        return $result;
-    }
-
-    private function PollPendingGroups($pending, $forceNames)
-    {
-        $ok = true;
-        $cache = $this->GetGroupNameCache();
-        $result = array();
-
-        foreach ($pending as $key => $p) {
-            if (substr($key, 0, 6) != 'Group_') continue;
-            $gid = (int)substr($key, 6);
-            if ($gid <= 0) continue;
-
-            $name = isset($cache[(string)$gid]) ? (string)$cache[(string)$gid] : '';
-            if ($forceNames || $name === '') {
-                $n = trim((string)$this->HttpGet('GetGroupDisplayName', (string)$gid, $ok));
-                if ($n === '') $n = 'Group ' . $gid;
-                $name = $n;
-                $cache[(string)$gid] = $name;
-            }
-
-            $val = $this->ToIntSafe($this->HttpGet('GetGroupValue', (string)$gid, $ok));
-            if (!$ok) $val = 0;
-
-            $this->ResolvePendingIfReached('Group_' . $gid, $val, 0);
-            $result[] = array('id' => $gid, 'name' => $name, 'val' => $val);
-        }
-
-        $this->SetGroupNameCache($cache);
-        return $result;
-    }
-
-    private function PollAllColorsFromMasterConfig()
-    {
-        $ids = $this->GetGlobalColorIDsFromMaster();
-        if (count($ids) == 0) return array();
-
-        $ok = true;
-        $result = array();
-        foreach ($ids as $cid) {
-            $hex = trim((string)$this->HttpGet('GetGlobalColorRGB', (string)$cid, $ok));
-            if ($ok && strlen($hex) == 6) {
-                $hexInt = hexdec($hex);
-                $this->ResolvePendingIfReached('Color_' . $cid, $hexInt, 0);
-                $result[] = array('id' => $cid, 'hex' => $hexInt);
-            }
-        }
-        return $result;
-    }
-
-    private function PollPendingColors($pending)
-    {
-        $ok = true;
-        $result = array();
-
-        foreach ($pending as $key => $p) {
-            if (substr($key, 0, 6) != 'Color_') continue;
-            $cid = (int)substr($key, 6);
-            if ($cid <= 0) continue;
-
-            $hex = trim((string)$this->HttpGet('GetGlobalColorRGB', (string)$cid, $ok));
-            if ($ok && strlen($hex) == 6) {
-                $hexInt = hexdec($hex);
-                $this->ResolvePendingIfReached('Color_' . $cid, $hexInt, 0);
-                $result[] = array('id' => $cid, 'hex' => $hexInt);
-            }
-        }
-
-        return $result;
-    }
-
-    // ===== Pending =====
 
     private function MarkPending($key, $desired)
     {
@@ -589,32 +633,8 @@ class MadrixController extends IPSModule
         $timeout = (int)$this->ReadPropertyInteger('PendingTimeout');
         if ($timeout < 2) $timeout = 10;
 
-        $pending[$key] = array(
-            'desired' => $desired,
-            'deadline' => time() + $timeout
-        );
+        $pending[$key] = array('desired' => $desired, 'deadline' => time() + $timeout);
         $this->SetBuffer('Pending', json_encode($pending));
-    }
-
-    private function ResolvePendingIfReached($key, $actual, $epsilon)
-    {
-        $pending = $this->GetPending();
-        if (!isset($pending[$key])) return;
-
-        $p = $pending[$key];
-        $deadline = isset($p['deadline']) ? (int)$p['deadline'] : 0;
-        $desired = isset($p['desired']) ? $p['desired'] : null;
-
-        if ($deadline > 0 && time() > $deadline) {
-            unset($pending[$key]);
-            $this->SetBuffer('Pending', json_encode($pending));
-            return;
-        }
-
-        if ($this->Matches($actual, $desired, $epsilon)) {
-            unset($pending[$key]);
-            $this->SetBuffer('Pending', json_encode($pending));
-        }
     }
 
     private function GetPending()
@@ -632,54 +652,12 @@ class MadrixController extends IPSModule
         return abs((float)$a - (float)$b) <= (float)$epsilon;
     }
 
-    // ===== Cache =====
-
-    private function GetGroupNameCache()
-    {
-        $raw = $this->GetBuffer('GroupNameCache');
-        $arr = json_decode($raw, true);
-        if (!is_array($arr)) $arr = array();
-        return $arr;
-    }
-
-    private function SetGroupNameCache($arr)
-    {
-        if (!is_array($arr)) $arr = array();
-        $this->SetBuffer('GroupNameCache', json_encode($arr));
-    }
-
-    // ===== Colors Config =====
-
-    private function GetGlobalColorIDsFromMaster()
-    {
-        $masterInst = (int)$this->ReadAttributeInteger('MasterInstance');
-        if ($masterInst <= 0 || !IPS_ObjectExists($masterInst)) return array();
-
-        $raw = @IPS_GetProperty($masterInst, 'GlobalColors');
-        if (!is_string($raw)) $raw = '[]';
-
-        $cfg = json_decode($raw, true);
-        if (!is_array($cfg)) $cfg = array();
-
-        $ids = array();
-        foreach ($cfg as $entry) {
-            if (!is_array($entry)) continue;
-            $cid = isset($entry['GlobalColorId']) ? (int)$entry['GlobalColorId'] : 0;
-            if ($cid > 0) $ids[] = $cid;
-        }
-        return array_values(array_unique($ids));
-    }
-
-    // ===== After change =====
-
     private function AfterChange()
     {
         $sec = (int)$this->ReadPropertyInteger('FastAfterChange');
         if ($sec < 0) $sec = 0;
         if ($sec > 0) $this->SetFastPollForSeconds($sec);
     }
-
-    // ===== HTTP =====
 
     private function HttpGet($function, $valueOrNull, &$ok)
     {
@@ -697,7 +675,6 @@ class MadrixController extends IPSModule
 
         $host = trim($this->ReadPropertyString('Host'));
         $port = (int)$this->ReadPropertyInteger('Port');
-        $basePath = trim($this->ReadPropertyString('ControlPath'));
 
         if ($host === '' || $port <= 0 || $port > 65535) {
             $ok = false;
@@ -705,13 +682,11 @@ class MadrixController extends IPSModule
             return '';
         }
 
-        if ($basePath === '') $basePath = '/RemoteCommands';
-        if (substr($basePath, 0, 1) != '/') $basePath = '/' . $basePath;
-
+        $base = '/RemoteCommands/';
         if ($valueOrNull === null) {
-            $path = $basePath . '/' . rawurlencode($function);
+            $path = $base . rawurlencode($function);
         } else {
-            $path = $basePath . '/' . rawurlencode($function) . '=' . rawurlencode((string)$valueOrNull);
+            $path = $base . rawurlencode($function) . '=' . rawurlencode((string)$valueOrNull);
         }
 
         $url = 'http://' . $host . ':' . $port . $path;
@@ -741,27 +716,25 @@ class MadrixController extends IPSModule
         return trim((string)$data);
     }
 
-    // ===== Polling/Diagnostics/Locks =====
-
     private function SetOnline($online, $err)
     {
-        // LastError + Log nur bei Änderung (kein Spam)
-        $vidOnline = $this->GetIDForIdent('Online');
-        if ($vidOnline > 0) {
-            $cur = GetValueBoolean($vidOnline);
-            if ((bool)$online !== (bool)$cur) {
-                $this->SetValue('Online', (bool)$online);
+        $this->SetValueIfChanged('Online', (bool)$online);
+
+        $e = (string)$err;
+        $vid = $this->GetIDForIdent('LastError');
+        if ($vid > 0) {
+            $cur = GetValue($vid);
+            if ($cur !== $e) {
+                $this->SetValue('LastError', $e);
             }
         }
 
-        $newErr = (string)$err;
-        $vidErr = $this->GetIDForIdent('LastError');
-        $oldErr = '';
-        if ($vidErr > 0) $oldErr = (string)GetValue($vidErr);
-
-        if ($newErr !== $oldErr) {
-            if ($vidErr > 0) $this->SetValue('LastError', $newErr);
-            if ($newErr !== '') $this->LogMessage($newErr, KL_WARNING);
+        $lastLogged = (string)$this->GetBuffer('LastLoggedError');
+        if ($e !== $lastLogged) {
+            $this->SetBuffer('LastLoggedError', $e);
+            if ($e !== '') {
+                $this->LogMessage($e, KL_WARNING);
+            }
         }
     }
 
@@ -769,7 +742,6 @@ class MadrixController extends IPSModule
     {
         $s = (int)$sec;
         if ($s <= 0) return;
-
         $until = time() + $s;
         $cur = (int)$this->GetBuffer('FastUntil');
         if ($until > $cur) {
@@ -808,12 +780,24 @@ class MadrixController extends IPSModule
         @IPS_SemaphoreLeave($key);
     }
 
+    private function SetValueIfChanged($ident, $value)
+    {
+        $vid = @$this->GetIDForIdent($ident);
+        if ($vid == 0) return;
+        $cur = GetValue($vid);
+        if ($cur !== $value) {
+            $this->SetValue($ident, $value);
+        }
+    }
+
     private function TryConnectChild($childId)
     {
         if ($childId <= 0 || !IPS_ObjectExists($childId)) return;
 
         if (function_exists('IPS_ConnectInstance')) {
             @IPS_ConnectInstance($childId, $this->InstanceID);
+        } else {
+            $this->LogMessage('IPS_ConnectInstance not available. Please connect child manually.', KL_WARNING);
         }
     }
 
@@ -827,20 +811,19 @@ class MadrixController extends IPSModule
         return (float)str_replace(',', '.', (string)$s);
     }
 
-    private function ToIntSafe($s)
-    {
-        $t = trim((string)$s);
-        if ($t === '') return 0;
-        if ($t === 'true') return 1;
-        if ($t === 'false') return 0;
-        return (int)$t;
-    }
-
     private function ClampInt($v, $min, $max)
     {
         $x = (int)$v;
         if ($x < (int)$min) $x = (int)$min;
         if ($x > (int)$max) $x = (int)$max;
         return $x;
+    }
+
+    private function GetJsonBuffer($name)
+    {
+        $raw = $this->GetBuffer($name);
+        $arr = json_decode($raw, true);
+        if (!is_array($arr)) $arr = array();
+        return $arr;
     }
 }
