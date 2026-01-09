@@ -3,57 +3,42 @@
   "author": "JLDFACE",
   "name": "MADRIX",
   "url": "https://github.com/JLDFACE/Symcon-MADRIX",
+  "compatibility": {
+    "version": "6.0"
+  },
   "version": "1.0",
   "build": 100,
-  "date": "2026-01-09",
+  "date": 20260109,
   "modules": [
     {
       "id": "{2B3A6B8C-4C2D-4D1E-9F55-0D7B8C1A2E01}",
       "name": "MadrixController",
       "type": 3,
       "vendor": "MADRIX",
-      "aliases": [
-        "MADRIX Controller"
-      ],
+      "aliases": ["MADRIX Controller"],
       "parentRequirements": [],
-      "childRequirements": [
-        "{E1B4B2E6-9D1C-4D5E-9C8B-0D3B1A2C3D41}"
-      ],
-      "implemented": [
-        "{E1B4B2E6-9D1C-4D5E-9C8B-0D3B1A2C3D41}"
-      ]
+      "childRequirements": ["{E1B4B2E6-9D1C-4D5E-9C8B-0D3B1A2C3D41}"],
+      "implemented": ["{E1B4B2E6-9D1C-4D5E-9C8B-0D3B1A2C3D41}"]
     },
     {
       "id": "{B9F0A0B1-0F6E-4F7B-9B44-3E3F6A1D2C11}",
       "name": "MadrixMaster",
       "type": 3,
       "vendor": "MADRIX",
-      "aliases": [
-        "MADRIX Master"
-      ],
-      "parentRequirements": [
-        "{E1B4B2E6-9D1C-4D5E-9C8B-0D3B1A2C3D41}"
-      ],
+      "aliases": ["MADRIX Master"],
+      "parentRequirements": ["{E1B4B2E6-9D1C-4D5E-9C8B-0D3B1A2C3D41}"],
       "childRequirements": [],
-      "implemented": [
-        "{E1B4B2E6-9D1C-4D5E-9C8B-0D3B1A2C3D41}"
-      ]
+      "implemented": ["{E1B4B2E6-9D1C-4D5E-9C8B-0D3B1A2C3D41}"]
     },
     {
       "id": "{C6C8F4A2-6D0C-4A2B-9D2B-7F2A0B1C9E31}",
       "name": "MadrixDeck",
       "type": 3,
       "vendor": "MADRIX",
-      "aliases": [
-        "MADRIX Deck"
-      ],
-      "parentRequirements": [
-        "{E1B4B2E6-9D1C-4D5E-9C8B-0D3B1A2C3D41}"
-      ],
+      "aliases": ["MADRIX Deck"],
+      "parentRequirements": ["{E1B4B2E6-9D1C-4D5E-9C8B-0D3B1A2C3D41}"],
       "childRequirements": [],
-      "implemented": [
-        "{E1B4B2E6-9D1C-4D5E-9C8B-0D3B1A2C3D41}"
-      ]
+      "implemented": ["{E1B4B2E6-9D1C-4D5E-9C8B-0D3B1A2C3D41}"]
     }
   ]
 }
