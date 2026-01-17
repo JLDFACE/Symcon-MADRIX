@@ -52,17 +52,6 @@ class MadrixMaster extends IPSModule
         @ $this->SendDataToParent(json_encode($payload));
     }
 
-    // Optional: Scan trigger (falls du Button im Master/Form nutzt)
-    public function StartPlaceScan()
-    {
-        $payload = array(
-            'DataID' => $this->DataID,
-            'cmd'    => 'StartPlaceScan',
-            'arg'    => null
-        );
-        @ $this->SendDataToParent(json_encode($payload));
-    }
-
     private function EnsureProfiles()
     {
         // Robust statt ~Intensity.255
@@ -197,6 +186,15 @@ class MadrixMaster extends IPSModule
     {
         $this->EnsureCategories();
         $cat = (int)$this->ReadAttributeInteger('CatGroups');
+        if ($cat == 0 || !IPS_ObjectExists($cat)) {
+            $cat = $this->FindCategoryByName($this->InstanceID, 'Groups');
+            if ($cat == 0) {
+                $cat = IPS_CreateCategory();
+                @IPS_SetName($cat, 'Groups');
+                @IPS_SetParent($cat, $this->InstanceID);
+            }
+            $this->WriteAttributeInteger('CatGroups', $cat);
+        }
 
         $map = $this->GetJsonBuffer('GroupVarMap');
 
@@ -240,6 +238,15 @@ class MadrixMaster extends IPSModule
     {
         $this->EnsureCategories();
         $cat = (int)$this->ReadAttributeInteger('CatColors');
+        if ($cat == 0 || !IPS_ObjectExists($cat)) {
+            $cat = $this->FindCategoryByName($this->InstanceID, 'Global Colors');
+            if ($cat == 0) {
+                $cat = IPS_CreateCategory();
+                @IPS_SetName($cat, 'Global Colors');
+                @IPS_SetParent($cat, $this->InstanceID);
+            }
+            $this->WriteAttributeInteger('CatColors', $cat);
+        }
 
         $map = $this->GetJsonBuffer('ColorVarMap');
 
