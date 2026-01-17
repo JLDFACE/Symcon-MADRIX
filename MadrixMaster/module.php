@@ -254,6 +254,7 @@ class MadrixMaster extends IPSModule
 
             $ident = 'Group_' . $gid;
 
+            $vid = 0;
             if (!isset($map[(string)$gid]) || !IPS_ObjectExists((int)$map[(string)$gid])) {
                 $this->RegisterVariableInteger($ident, $name, 'MADRIX.Percent', 1000 + $gid);
                 $vid = $this->GetIDForIdent($ident);
@@ -271,9 +272,14 @@ class MadrixMaster extends IPSModule
                 }
             }
 
-            if ($this->GetIDForIdent($ident) > 0) {
-                $this->EnableAction($ident);
-                $this->SetValue($ident, $this->ByteToPercent($val));
+            if ($vid > 0 && IPS_ObjectExists($vid)) {
+                $obj = @IPS_GetObject($vid);
+                $curIdent = is_array($obj) ? (string)$obj['ObjectIdent'] : '';
+                if ($curIdent !== $ident) {
+                    @IPS_SetIdent($vid, $ident);
+                }
+                @IPS_SetVariableCustomAction($vid, $this->InstanceID);
+                @SetValueInteger($vid, $this->ByteToPercent($val));
             }
         }
 
