@@ -103,7 +103,10 @@ class MadrixMaster extends IPSModule
         } else {
             if ((int)IPS_GetParent($cg) != (int)$this->InstanceID) @IPS_SetParent($cg, $this->InstanceID);
             if (IPS_GetName($cg) != 'Groups') @IPS_SetName($cg, 'Groups');
-            if (@IPS_GetIdent($cg) !== 'Groups') @IPS_SetIdent($cg, 'Groups');
+            $obj = @IPS_GetObject($cg);
+            if (!is_array($obj) || (string)$obj['ObjectIdent'] !== 'Groups') {
+                @IPS_SetIdent($cg, 'Groups');
+            }
         }
 
         $cc = (int)$this->ReadAttributeInteger('CatColors');
@@ -119,7 +122,10 @@ class MadrixMaster extends IPSModule
         } else {
             if ((int)IPS_GetParent($cc) != (int)$this->InstanceID) @IPS_SetParent($cc, $this->InstanceID);
             if (IPS_GetName($cc) != 'Global Colors') @IPS_SetName($cc, 'Global Colors');
-            if (@IPS_GetIdent($cc) !== 'GlobalColors') @IPS_SetIdent($cc, 'GlobalColors');
+            $obj = @IPS_GetObject($cc);
+            if (!is_array($obj) || (string)$obj['ObjectIdent'] !== 'GlobalColors') {
+                @IPS_SetIdent($cc, 'GlobalColors');
+            }
         }
     }
 
