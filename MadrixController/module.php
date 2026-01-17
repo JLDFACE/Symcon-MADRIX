@@ -202,6 +202,7 @@ class MadrixController extends IPSModule
             'total' => 1
         );
 
+        $this->SetBuffer('SkipStorageFullState', '0');
         $this->SetBuffer('ScanState', json_encode($state));
         $this->SetValue('ScanRunning', true);
         $this->SetValue('ScanProgress', 0);
@@ -227,6 +228,29 @@ class MadrixController extends IPSModule
         $ok = true;
 
         if ($state['phase'] == 'storages') {
+            if ($this->GetBuffer('SkipStorageFullState') === '1') {
+                $occ = $this->GetDeckStorages();
+                if (count($occ) == 0) {
+                    $this->StopScan('GetStorageFullState nicht verfuegbar und keine Deck-Storages gesetzt.');
+                    $this->Unlock();
+                    return;
+                }
+
+                $state['phase'] = 'places';
+                $state['storageIndex'] = 0;
+                $state['currentStorage'] = (int)$occ[0];
+                $state['p'] = 1;
+                $state['occupiedStorages'] = $occ;
+
+                $state['done'] = 256;
+                $state['total'] = 256 + (count($occ) * 256);
+
+                $this->SetValue('ScanInfo', 'GetStorageFullState nicht verfuegbar, nutze Deck-Storages: ' . count($occ));
+                $this->SetBuffer('ScanState', json_encode($state));
+                $this->Unlock();
+                return;
+            }
+
             for ($i = 0; $i < $chunk; $i++) {
                 $s = (int)$state['s'];
                 if ($s > 256) {
@@ -243,7 +267,14 @@ class MadrixController extends IPSModule
                     break;
                 }
 
-                $full = (int)$this->HttpGet('GetStorageFullState', 'S' . $s, $ok);
+                $ok = true;
+                $full = (int)$this->HttpGetSilent('GetStorageFullState', 'S' . $s, $ok);
+                if (!$ok) {
+                    $this->SetBuffer('SkipStorageFullState', '1');
+                    $this->LogMessage('GetStorageFullState nicht verfuegbar, nutze Deck-Storages als Fallback.', KL_WARNING);
+                    $this->Unlock();
+                    return;
+                }
                 if ($ok && $full == 1) {
                     $state['occupiedStorages'][] = $s;
                 }
@@ -948,7 +979,17 @@ class MadrixController extends IPSModule
         $this->HttpRequest($function, $value, $ok);
     }
 
+    private function HttpGetSilent($function, $valueOrNull, &$ok)
+    {
+        return $this->HttpRequestInternal($function, $valueOrNull, $ok, true);
+    }
+
     private function HttpRequest($function, $valueOrNull, &$ok)
+    {
+        return $this->HttpRequestInternal($function, $valueOrNull, $ok, false);
+    }
+
+    private function HttpRequestInternal($function, $valueOrNull, &$ok, $suppressOnline)
     {
         $ok = true;
 
@@ -957,7 +998,9 @@ class MadrixController extends IPSModule
 
         if ($host === '' || $port <= 0 || $port > 65535) {
             $ok = false;
-            $this->SetOnline(false, 'Host/Port nicht konfiguriert');
+            if (!$suppressOnline) {
+                $this->SetOnline(false, 'Host/Port nicht konfiguriert');
+            }
             return '';
         }
 
@@ -988,7 +1031,9 @@ class MadrixController extends IPSModule
         $data = @file_get_contents($url, false, $ctx);
         if ($data === false) {
             $ok = false;
-            $this->SetOnline(false, 'HTTP failed: ' . $function);
+            if (!$suppressOnline) {
+                $this->SetOnline(false, 'HTTP failed: ' . $function);
+            }
             return '';
         }
 
@@ -1104,5 +1149,23 @@ class MadrixController extends IPSModule
         $arr = json_decode($raw, true);
         if (!is_array($arr)) $arr = array();
         return $arr;
+    }
+
+    private function GetDeckStorages()
+    {
+        $storages = array();
+        $a = (int)$this->ReadAttributeInteger('DeckAInstance');
+        $b = (int)$this->ReadAttributeInteger('DeckBInstance');
+
+        if ($a > 0 && IPS_ObjectExists($a)) {
+            $sa = (int)@IPS_GetProperty($a, 'Storage');
+            if ($sa > 0) $storages[] = $sa;
+        }
+        if ($b > 0 && IPS_ObjectExists($b)) {
+            $sb = (int)@IPS_GetProperty($b, 'Storage');
+            if ($sb > 0) $storages[] = $sb;
+        }
+
+        return array_values(array_unique($storages));
     }
 }
