@@ -706,7 +706,8 @@ class MadrixController extends IPSModule
         $groupsPayload = array();
         $colorsPayload = array();
 
-        if (!$isFast) {
+        $hasGroups = count($this->GetGroupNameCache()) > 0;
+        if (!$isFast || $forceNames || !$hasGroups) {
             $groupsPayload = $this->PollAllGroups($forceNames);
             $colorsPayload = $this->PollAllColorsFromMasterConfig();
         } else {
