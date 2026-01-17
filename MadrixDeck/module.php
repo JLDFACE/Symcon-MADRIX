@@ -27,6 +27,8 @@ class MadrixDeck extends IPSModule
     {
         parent::ApplyChanges();
 
+        $this->EnsureProfiles();
+
         $deck = $this->GetDeck();
 
         $pvid = $this->GetIDForIdent('Place');

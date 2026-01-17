@@ -96,6 +96,13 @@ class MadrixMaster extends IPSModule
         }
     }
 
+    public function SyncLocal()
+    {
+        $this->EnsureProfiles();
+        $this->EnsureCategories();
+        $this->SyncColorVariablesFromConfig();
+    }
+
     public function RequestAction($Ident, $Value)
     {
         if ($Ident == 'Master') {
