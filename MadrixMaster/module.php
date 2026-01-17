@@ -315,7 +315,8 @@ class MadrixMaster extends IPSModule
 
         foreach ($varIds as $vid) {
             if ($vid <= 0 || !IPS_ObjectExists($vid)) continue;
-            $ident = (string)IPS_GetIdent($vid);
+            $obj = @IPS_GetObject($vid);
+            $ident = is_array($obj) ? (string)$obj['ObjectIdent'] : '';
 
             if ($ident === 'Master' || strpos($ident, $groupPrefix) === 0) {
                 IPS_SetVariableCustomProfile($vid, 'MADRIX.Percent');
