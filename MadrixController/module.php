@@ -22,6 +22,7 @@ class MadrixController extends IPSModule
         $this->RegisterPropertyInteger('PollFast', 2);
         $this->RegisterPropertyInteger('FastAfterChange', 30);
         $this->RegisterPropertyInteger('PendingTimeout', 10);
+        $this->RegisterPropertyInteger('DevicesParent', 0);
 
         // Scan (Chunked)
         $this->RegisterPropertyInteger('ScanChunk', 8);
@@ -114,16 +115,17 @@ class MadrixController extends IPSModule
         $cat = (int)$this->ReadAttributeInteger('DevicesCategory');
         if ($cat == 0 || !IPS_ObjectExists($cat)) {
             $cat = IPS_CreateCategory();
-            @IPS_SetName($cat, 'Devices');
-            @IPS_SetParent($cat, $this->InstanceID);
+            @IPS_SetName($cat, 'MADRIX Devices');
+            @IPS_SetParent($cat, $this->GetDevicesParent());
             $this->WriteAttributeInteger('DevicesCategory', $cat);
         } else {
             // Parent/Name nur setzen, wenn nötig (verhindert "Root kann nicht geändert werden")
-            if ((int)IPS_GetParent($cat) != (int)$this->InstanceID) {
-                @IPS_SetParent($cat, $this->InstanceID);
+            $desiredParent = $this->GetDevicesParent();
+            if ((int)IPS_GetParent($cat) != (int)$desiredParent) {
+                @IPS_SetParent($cat, $desiredParent);
             }
-            if (IPS_GetName($cat) != 'Devices') {
-                @IPS_SetName($cat, 'Devices');
+            if (IPS_GetName($cat) != 'MADRIX Devices') {
+                @IPS_SetName($cat, 'MADRIX Devices');
             }
         }
 
@@ -1251,5 +1253,14 @@ class MadrixController extends IPSModule
         }
 
         return array_values(array_unique($storages));
+    }
+
+    private function GetDevicesParent()
+    {
+        $parent = (int)$this->ReadPropertyInteger('DevicesParent');
+        if ($parent <= 0 || !IPS_ObjectExists($parent)) {
+            return 0;
+        }
+        return $parent;
     }
 }
