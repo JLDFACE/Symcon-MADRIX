@@ -37,6 +37,8 @@ class MadrixMaster extends IPSModule
         if ($mid > 0) {
             IPS_SetVariableCustomProfile($mid, 'MADRIX.Percent');
         }
+
+        $this->NormalizePercentVariables();
     }
 
     // Damit MADRIX_ForceNameSync($id) auf Master nicht crasht: an Controller weiterleiten
@@ -304,6 +306,45 @@ class MadrixMaster extends IPSModule
         }
 
         return 0;
+    }
+
+    private function NormalizePercentVariables()
+    {
+        $varIds = $this->CollectVariableIds($this->InstanceID);
+        $groupPrefix = 'Group_';
+
+        foreach ($varIds as $vid) {
+            if ($vid <= 0 || !IPS_ObjectExists($vid)) continue;
+            $ident = (string)IPS_GetIdent($vid);
+
+            if ($ident === 'Master' || strpos($ident, $groupPrefix) === 0) {
+                IPS_SetVariableCustomProfile($vid, 'MADRIX.Percent');
+                $val = (int)@GetValueInteger($vid);
+                if ($val > 100) {
+                    $this->SetValue($ident, $this->ByteToPercent($val));
+                }
+            }
+        }
+    }
+
+    private function CollectVariableIds($parentId)
+    {
+        $out = array();
+        $children = @IPS_GetChildrenIDs($parentId);
+        if (!is_array($children)) return $out;
+
+        foreach ($children as $id) {
+            $obj = @IPS_GetObject($id);
+            if (!is_array($obj)) continue;
+
+            if ((int)$obj['ObjectType'] === 2) {
+                $out[] = (int)$id;
+            } elseif ((int)$obj['ObjectType'] === 0) {
+                $out = array_merge($out, $this->CollectVariableIds((int)$id));
+            }
+        }
+
+        return $out;
     }
 
     private function PercentToByte($p)
