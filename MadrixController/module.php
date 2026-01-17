@@ -67,7 +67,7 @@ class MadrixController extends IPSModule
 
         // Scan Diagnose/UI
         $this->RegisterVariableBoolean('ScanRunning', 'Place Scan Running', '~Switch', 20);
-        $this->RegisterVariableInteger('ScanProgress', 'Place Scan Progress (%)', '~Percent', 21);
+        $this->RegisterVariableInteger('ScanProgress', 'Place Scan Progress (%)', 'MADRIX.Percent', 21);
         $this->RegisterVariableString('ScanInfo', 'Place Scan Info', '', 22);
         $this->RegisterVariableString('ScanLastRun', 'Place Scan Last Run', '', 23);
     }
@@ -94,6 +94,12 @@ class MadrixController extends IPSModule
             IPS_CreateVariableProfile('MADRIX.Online', 0);
             IPS_SetVariableProfileAssociation('MADRIX.Online', 0, 'Offline', '', 0);
             IPS_SetVariableProfileAssociation('MADRIX.Online', 1, 'Online', '', 0);
+        }
+
+        if (!IPS_VariableProfileExists('MADRIX.Percent')) {
+            IPS_CreateVariableProfile('MADRIX.Percent', 1);
+            IPS_SetVariableProfileValues('MADRIX.Percent', 0, 100, 1);
+            IPS_SetVariableProfileSuffix('MADRIX.Percent', ' %');
         }
     }
 
