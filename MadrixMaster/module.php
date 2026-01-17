@@ -22,7 +22,7 @@ class MadrixMaster extends IPSModule
         $this->RegisterVariableInteger('Master', 'Master', 'MADRIX.Intensity255', 1);
         $this->EnableAction('Master');
 
-        $this->RegisterVariableBoolean('Blackout', 'Blackout', '~Switch', 2);
+        $this->RegisterVariableBoolean('Blackout', 'Blackout', 'MADRIX.Switch', 2);
         $this->EnableAction('Blackout');
     }
 
@@ -62,6 +62,12 @@ class MadrixMaster extends IPSModule
         if (!IPS_VariableProfileExists('MADRIX.Intensity255')) {
             IPS_CreateVariableProfile('MADRIX.Intensity255', 1);
             IPS_SetVariableProfileValues('MADRIX.Intensity255', 0, 255, 1);
+        }
+
+        if (!IPS_VariableProfileExists('MADRIX.Switch')) {
+            IPS_CreateVariableProfile('MADRIX.Switch', 0);
+            IPS_SetVariableProfileAssociation('MADRIX.Switch', 0, 'Aus', '', 0);
+            IPS_SetVariableProfileAssociation('MADRIX.Switch', 1, 'Ein', '', 0);
         }
 
         // Robust statt ~HexColor
