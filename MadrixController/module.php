@@ -543,6 +543,28 @@ class MadrixController extends IPSModule
                     $resp = array('ok' => $ok);
                 }
 
+            } elseif ($cmd == 'SetFadeType') {
+                $t = trim((string)$arg);
+                if ($t !== '') {
+                    $this->HttpSet('SetFadeType', $t, $ok);
+                    if ($ok) {
+                        $this->MarkPending('FadeType', $t);
+                        $this->AfterChange();
+                    }
+                } else {
+                    $ok = false;
+                }
+                $resp = array('ok' => $ok);
+
+            } elseif ($cmd == 'SetFadeValue') {
+                $v = $this->ClampInt((int)$arg, 0, 255);
+                $this->HttpSet('SetFadeValue', (string)$v, $ok);
+                if ($ok) {
+                    $this->MarkPending('FadeValue', $v);
+                    $this->AfterChange();
+                }
+                $resp = array('ok' => $ok);
+
             } else {
                 $resp = array('ok' => false, 'error' => 'unknown cmd');
             }
@@ -695,12 +717,48 @@ class MadrixController extends IPSModule
         $this->ResolvePendingIfReached('Master', $master, 0);
         $this->ResolvePendingIfReached('Blackout', $blackout, 0);
 
+        // Fade (immer)
+        $fadeOk = true;
+        $fadeType = trim((string)$this->HttpGetSilent('GetFadeType', null, $fadeOk));
+        if (!$fadeOk) $fadeType = '';
+        $fadeOk2 = true;
+        $fadeValue = (int)$this->HttpGetSilent('GetFadeValue', null, $fadeOk2);
+        if (!$fadeOk2) $fadeValue = 0;
+        $this->ResolvePendingIfReached('FadeType', $fadeType, 0);
+        $this->ResolvePendingIfReached('FadeValue', $fadeValue, 0);
+
         // Decks (immer)
         $deckAInst = (int)$this->ReadAttributeInteger('DeckAInstance');
         $deckBInst = (int)$this->ReadAttributeInteger('DeckBInstance');
 
         $deckA = $this->PollDeck('A', $deckAInst, $forceNames);
         $deckB = $this->PollDeck('B', $deckBInst, $forceNames);
+
+        // Enforce Crossfader (aus Master-Konfig)
+        $cfg = $this->GetCrossfaderConfigFromMaster();
+        if (isset($cfg['enforce']) && $cfg['enforce']) {
+            $pendingNow = $this->GetPending();
+
+            $desiredType = isset($cfg['type']) ? (string)$cfg['type'] : '';
+            if ($desiredType !== '' && !isset($pendingNow['FadeType']) && $fadeType !== '' && $fadeType !== $desiredType) {
+                $setOk = true;
+                $this->HttpSet('SetFadeType', $desiredType, $setOk);
+                if ($setOk) {
+                    $this->MarkPending('FadeType', $desiredType);
+                    $this->AfterChange();
+                }
+            }
+
+            $desiredValue = isset($cfg['value']) ? (int)$cfg['value'] : null;
+            if ($desiredValue !== null && !isset($pendingNow['FadeValue']) && ($fadeValue !== $desiredValue)) {
+                $setOk = true;
+                $this->HttpSet('SetFadeValue', (string)$desiredValue, $setOk);
+                if ($setOk) {
+                    $this->MarkPending('FadeValue', $desiredValue);
+                    $this->AfterChange();
+                }
+            }
+        }
 
         // Groups/Colors je nach Mode
         $groupsPayload = array();
@@ -722,6 +780,10 @@ class MadrixController extends IPSModule
             'master' => array(
                 'master' => $master,
                 'blackout' => ($blackout == 1) ? 1 : 0
+            ),
+            'fade' => array(
+                'type' => $fadeType,
+                'value' => $fadeValue
             ),
             'groups' => $groupsPayload,
             'colors' => $colorsPayload,
@@ -936,6 +998,27 @@ class MadrixController extends IPSModule
             if ($cid > 0) $ids[] = $cid;
         }
         return array_values(array_unique($ids));
+    }
+
+    private function GetCrossfaderConfigFromMaster()
+    {
+        $masterInst = (int)$this->ReadAttributeInteger('MasterInstance');
+        if ($masterInst <= 0 || !IPS_ObjectExists($masterInst)) {
+            return array('enforce' => false);
+        }
+
+        $enforce = (bool)@IPS_GetProperty($masterInst, 'EnforceCrossfader');
+        $type = trim((string)@IPS_GetProperty($masterInst, 'CrossfadeType'));
+        $p = (int)@IPS_GetProperty($masterInst, 'CrossfadeValue');
+        if ($p < 0) $p = 0;
+        if ($p > 100) $p = 100;
+        $value = (int)round(($p * 255) / 100);
+
+        return array(
+            'enforce' => $enforce,
+            'type' => $type,
+            'value' => $value
+        );
     }
 
     private function MarkPending($key, $desired)

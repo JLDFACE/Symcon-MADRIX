@@ -2,6 +2,46 @@
   "elements": [
     {
       "type": "ExpansionPanel",
+      "caption": "Crossfader",
+      "items": [
+        {
+          "type": "CheckBox",
+          "name": "EnforceCrossfader",
+          "caption": "Crossfader permanent erzwingen"
+        },
+        {
+          "type": "Select",
+          "name": "CrossfadeType",
+          "caption": "Fade Mode",
+          "options": [
+            { "caption": "XF (CrossFade)", "value": "XF" },
+            { "caption": "WF (WhiteFade)", "value": "WF" },
+            { "caption": "BF (BlackFade)", "value": "BF" },
+            { "caption": "WipeX", "value": "WipeX" },
+            { "caption": "WipeY", "value": "WipeY" },
+            { "caption": "WipeXC", "value": "WipeXC" },
+            { "caption": "WipeYC", "value": "WipeYC" },
+            { "caption": "SlideX", "value": "SlideX" },
+            { "caption": "SlideY", "value": "SlideY" },
+            { "caption": "SlideXC", "value": "SlideXC" },
+            { "caption": "SlideYC", "value": "SlideYC" },
+            { "caption": "WipeZ", "value": "WipeZ" },
+            { "caption": "WipeZC", "value": "WipeZC" },
+            { "caption": "SlideZ", "value": "SlideZ" },
+            { "caption": "SlideZC", "value": "SlideZC" }
+          ]
+        },
+        {
+          "type": "NumberSpinner",
+          "name": "CrossfadeValue",
+          "caption": "Crossfader Wert (0%=Deck A, 100%=Deck B)",
+          "minimum": 0,
+          "maximum": 100
+        }
+      ]
+    },
+    {
+      "type": "ExpansionPanel",
       "caption": "Global Colors",
       "items": [
         {
@@ -31,11 +71,6 @@
       "type": "Button",
       "caption": "Namen/Struktur neu synchronisieren",
       "onClick": "MADRIX_ForceNameSync($id);"
-    },
-    {
-      "type": "Button",
-      "caption": "Place Scan starten (nur belegte Places)",
-      "onClick": "MADRIX_StartPlaceScan($id);"
     }
   ]
 }

@@ -9,6 +9,9 @@ class MadrixMaster extends IPSModule
         parent::Create();
 
         $this->RegisterPropertyString('GlobalColors', '[]'); // [{"GlobalColorId":1},...]
+        $this->RegisterPropertyBoolean('EnforceCrossfader', false);
+        $this->RegisterPropertyString('CrossfadeType', 'XF');
+        $this->RegisterPropertyInteger('CrossfadeValue', 0); // percent 0..100
 
         $this->RegisterAttributeInteger('CatGroups', 0);
         $this->RegisterAttributeInteger('CatColors', 0);
@@ -21,6 +24,9 @@ class MadrixMaster extends IPSModule
 
         $this->RegisterVariableInteger('Master', 'Master', 'MADRIX.Percent', 1);
         $this->EnableAction('Master');
+
+        $this->RegisterVariableString('FadeType', 'Fade Mode', '', 3);
+        $this->RegisterVariableInteger('Crossfader', 'Crossfader', 'MADRIX.Percent', 4);
 
         $this->RegisterVariableBoolean('Blackout', 'Blackout', 'MADRIX.Switch', 2);
         $this->EnableAction('Blackout');
@@ -39,6 +45,8 @@ class MadrixMaster extends IPSModule
         }
 
         $this->NormalizePercentVariables();
+
+        $this->ApplyCrossfaderConfig();
     }
 
     // Damit MADRIX_ForceNameSync($id) auf Master nicht crasht: an Controller weiterleiten
@@ -117,6 +125,24 @@ class MadrixMaster extends IPSModule
         $this->SyncColorVariablesFromConfig();
     }
 
+    public function ApplyCrossfaderConfig()
+    {
+        if (!$this->ReadPropertyBoolean('EnforceCrossfader')) {
+            return;
+        }
+
+        $type = trim((string)$this->ReadPropertyString('CrossfadeType'));
+        if ($type !== '') {
+            $this->SendToParent('SetFadeType', $type);
+        }
+
+        $p = (int)$this->ReadPropertyInteger('CrossfadeValue');
+        if ($p < 0) $p = 0;
+        if ($p > 100) $p = 100;
+        $v = $this->PercentToByte($p);
+        $this->SendToParent('SetFadeValue', $v);
+    }
+
     public function RequestAction($Ident, $Value)
     {
         if ($Ident == 'Master') {
@@ -176,6 +202,15 @@ class MadrixMaster extends IPSModule
                 $this->SetValue('Master', $this->ByteToPercent((int)$data['master']['master']));
             }
             if (isset($data['master']['blackout'])) $this->SetValue('Blackout', ((int)$data['master']['blackout'] == 1));
+        }
+
+        if (isset($data['fade']) && is_array($data['fade'])) {
+            if (isset($data['fade']['type'])) {
+                $this->SetValue('FadeType', (string)$data['fade']['type']);
+            }
+            if (isset($data['fade']['value'])) {
+                $this->SetValue('Crossfader', $this->ByteToPercent((int)$data['fade']['value']));
+            }
         }
 
         if (isset($data['groups']) && is_array($data['groups'])) $this->EnsureGroupVars($data['groups']);
