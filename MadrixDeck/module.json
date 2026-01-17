@@ -10,6 +10,8 @@
     "{E1B4B2E6-9D1C-4D5E-9C8B-0D3B1A2C3D41}"
   ],
   "childRequirements": [],
-  "implemented": [],
+  "implemented": [
+    "{E1B4B2E6-9D1C-4D5E-9C8B-0D3B1A2C3D41}"
+  ],
   "prefix": "MADRIX"
 }
