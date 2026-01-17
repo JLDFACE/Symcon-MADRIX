@@ -112,22 +112,8 @@ class MadrixController extends IPSModule
 
     public function EnsureDevices()
     {
-        $cat = (int)$this->ReadAttributeInteger('DevicesCategory');
-        if ($cat == 0 || !IPS_ObjectExists($cat)) {
-            $cat = IPS_CreateCategory();
-            @IPS_SetName($cat, 'MADRIX Devices');
-            @IPS_SetParent($cat, $this->GetDevicesParent());
-            $this->WriteAttributeInteger('DevicesCategory', $cat);
-        } else {
-            // Parent/Name nur setzen, wenn nötig (verhindert "Root kann nicht geändert werden")
-            $desiredParent = $this->GetDevicesParent();
-            if ((int)IPS_GetParent($cat) != (int)$desiredParent) {
-                @IPS_SetParent($cat, $desiredParent);
-            }
-            if (IPS_GetName($cat) != 'MADRIX Devices') {
-                @IPS_SetName($cat, 'MADRIX Devices');
-            }
-        }
+        $cat = $this->GetDevicesCategoryId();
+        $this->CleanupDuplicateDeviceCategories($cat);
 
         // Master
         $master = (int)$this->ReadAttributeInteger('MasterInstance');
@@ -1262,5 +1248,134 @@ class MadrixController extends IPSModule
             return 0;
         }
         return $parent;
+    }
+
+    private function GetDevicesCategoryId()
+    {
+        $desiredParent = $this->GetDevicesParent();
+        $desiredIdent = 'MADRIX_Devices_' . $this->InstanceID;
+
+        $cat = (int)$this->ReadAttributeInteger('DevicesCategory');
+        if ($cat > 0 && IPS_ObjectExists($cat)) {
+            $this->EnsureDevicesCategoryPlacement($cat, $desiredParent, $desiredIdent);
+            return $cat;
+        }
+
+        $cat = $this->FindCategoryByIdent($desiredIdent, 0);
+        if ($cat > 0) {
+            $this->EnsureDevicesCategoryPlacement($cat, $desiredParent, $desiredIdent);
+            $this->WriteAttributeInteger('DevicesCategory', $cat);
+            return $cat;
+        }
+
+        $cat = IPS_CreateCategory();
+        @IPS_SetName($cat, 'MADRIX Devices');
+        @IPS_SetParent($cat, $desiredParent);
+        @IPS_SetIdent($cat, $desiredIdent);
+        $this->WriteAttributeInteger('DevicesCategory', $cat);
+        return $cat;
+    }
+
+    private function EnsureDevicesCategoryPlacement($catId, $desiredParent, $desiredIdent)
+    {
+        if ((int)IPS_GetParent($catId) != (int)$desiredParent) {
+            @IPS_SetParent($catId, $desiredParent);
+        }
+        if (IPS_GetName($catId) != 'MADRIX Devices') {
+            @IPS_SetName($catId, 'MADRIX Devices');
+        }
+        $obj = @IPS_GetObject($catId);
+        $ident = is_array($obj) ? (string)$obj['ObjectIdent'] : '';
+        if ($ident !== $desiredIdent) {
+            @IPS_SetIdent($catId, $desiredIdent);
+        }
+    }
+
+    private function CleanupDuplicateDeviceCategories($keepCatId)
+    {
+        $candidates = $this->FindCategoriesByName(array('MADRIX Devices', 'Devices'), 0);
+        foreach ($candidates as $catId) {
+            if ($catId == $keepCatId) continue;
+            if (!$this->CategoryBelongsToThisController($catId)) continue;
+
+            $children = @IPS_GetChildrenIDs($catId);
+            if (is_array($children)) {
+                foreach ($children as $childId) {
+                    $obj = @IPS_GetObject($childId);
+                    if (!is_array($obj)) continue;
+                    if ((int)$obj['ObjectType'] === 1) {
+                        $inst = @IPS_GetInstance($childId);
+                        if (is_array($inst) && (int)$inst['ConnectionID'] === (int)$this->InstanceID) {
+                            @IPS_DeleteInstance($childId);
+                        }
+                    }
+                }
+            }
+
+            @IPS_DeleteObject($catId);
+        }
+    }
+
+    private function CategoryBelongsToThisController($catId)
+    {
+        $children = @IPS_GetChildrenIDs($catId);
+        if (!is_array($children)) return false;
+
+        foreach ($children as $childId) {
+            $obj = @IPS_GetObject($childId);
+            if (!is_array($obj)) continue;
+            if ((int)$obj['ObjectType'] !== 1) continue;
+            $inst = @IPS_GetInstance($childId);
+            if (!is_array($inst)) continue;
+            if ((int)$inst['ConnectionID'] === (int)$this->InstanceID) return true;
+        }
+
+        return false;
+    }
+
+    private function FindCategoryByIdent($ident, $parentId)
+    {
+        $children = @IPS_GetChildrenIDs($parentId);
+        if (!is_array($children)) return 0;
+
+        foreach ($children as $id) {
+            $obj = @IPS_GetObject($id);
+            if (!is_array($obj)) continue;
+            if ((int)$obj['ObjectType'] !== 0) continue;
+            if ((string)$obj['ObjectIdent'] === $ident) return (int)$id;
+        }
+
+        foreach ($children as $id) {
+            $obj = @IPS_GetObject($id);
+            if (!is_array($obj)) continue;
+            if ((int)$obj['ObjectType'] !== 0) continue;
+            $found = $this->FindCategoryByIdent($ident, (int)$id);
+            if ($found > 0) return $found;
+        }
+
+        return 0;
+    }
+
+    private function FindCategoriesByName($names, $parentId)
+    {
+        $result = array();
+        if (!is_array($names)) return $result;
+
+        $children = @IPS_GetChildrenIDs($parentId);
+        if (!is_array($children)) return $result;
+
+        foreach ($children as $id) {
+            $obj = @IPS_GetObject($id);
+            if (!is_array($obj)) continue;
+            if ((int)$obj['ObjectType'] === 0) {
+                $name = (string)$obj['ObjectName'];
+                if (in_array($name, $names, true)) {
+                    $result[] = (int)$id;
+                }
+                $result = array_merge($result, $this->FindCategoriesByName($names, (int)$id));
+            }
+        }
+
+        return $result;
     }
 }
