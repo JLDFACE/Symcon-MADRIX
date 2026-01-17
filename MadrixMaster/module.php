@@ -45,6 +45,7 @@ class MadrixMaster extends IPSModule
         }
 
         $this->NormalizePercentVariables();
+        $this->NormalizeCategories();
 
         $this->ApplyCrossfaderConfig();
     }
@@ -91,30 +92,34 @@ class MadrixMaster extends IPSModule
     {
         $cg = (int)$this->ReadAttributeInteger('CatGroups');
         if ($cg == 0 || !IPS_ObjectExists($cg)) {
-            $cg = $this->FindCategoryByName($this->InstanceID, 'Groups');
+            $cg = $this->GetCategoryByIdentOrName($this->InstanceID, 'Groups', 'Groups');
             if ($cg == 0) {
                 $cg = IPS_CreateCategory();
                 @IPS_SetName($cg, 'Groups');
                 @IPS_SetParent($cg, $this->InstanceID);
+                @IPS_SetIdent($cg, 'Groups');
             }
             $this->WriteAttributeInteger('CatGroups', $cg);
         } else {
             if ((int)IPS_GetParent($cg) != (int)$this->InstanceID) @IPS_SetParent($cg, $this->InstanceID);
             if (IPS_GetName($cg) != 'Groups') @IPS_SetName($cg, 'Groups');
+            if (@IPS_GetIdent($cg) !== 'Groups') @IPS_SetIdent($cg, 'Groups');
         }
 
         $cc = (int)$this->ReadAttributeInteger('CatColors');
         if ($cc == 0 || !IPS_ObjectExists($cc)) {
-            $cc = $this->FindCategoryByName($this->InstanceID, 'Global Colors');
+            $cc = $this->GetCategoryByIdentOrName($this->InstanceID, 'GlobalColors', 'Global Colors');
             if ($cc == 0) {
                 $cc = IPS_CreateCategory();
                 @IPS_SetName($cc, 'Global Colors');
                 @IPS_SetParent($cc, $this->InstanceID);
+                @IPS_SetIdent($cc, 'GlobalColors');
             }
             $this->WriteAttributeInteger('CatColors', $cc);
         } else {
             if ((int)IPS_GetParent($cc) != (int)$this->InstanceID) @IPS_SetParent($cc, $this->InstanceID);
             if (IPS_GetName($cc) != 'Global Colors') @IPS_SetName($cc, 'Global Colors');
+            if (@IPS_GetIdent($cc) !== 'GlobalColors') @IPS_SetIdent($cc, 'GlobalColors');
         }
     }
 
@@ -335,10 +340,17 @@ class MadrixMaster extends IPSModule
         return $arr;
     }
 
-    private function FindCategoryByName($parentId, $name)
+    private function GetCategoryByIdentOrName($parentId, $ident, $name)
     {
         $children = @IPS_GetChildrenIDs($parentId);
         if (!is_array($children)) return 0;
+
+        foreach ($children as $id) {
+            $obj = @IPS_GetObject($id);
+            if (!is_array($obj)) continue;
+            if ((int)$obj['ObjectType'] !== 0) continue;
+            if ((string)$obj['ObjectIdent'] === $ident) return (int)$id;
+        }
 
         foreach ($children as $id) {
             $obj = @IPS_GetObject($id);
@@ -350,6 +362,44 @@ class MadrixMaster extends IPSModule
         return 0;
     }
 
+    private function NormalizeCategories()
+    {
+        $groupsCat = (int)$this->ReadAttributeInteger('CatGroups');
+        $colorsCat = (int)$this->ReadAttributeInteger('CatColors');
+        if ($groupsCat <= 0 || $colorsCat <= 0) return;
+
+        $children = @IPS_GetChildrenIDs($this->InstanceID);
+        if (!is_array($children)) return;
+
+        foreach ($children as $id) {
+            $obj = @IPS_GetObject($id);
+            if (!is_array($obj)) continue;
+            if ((int)$obj['ObjectType'] !== 0) continue;
+
+            $name = (string)$obj['ObjectName'];
+            if ($name === 'Groups' && (int)$id !== $groupsCat) {
+                $this->MoveVariablesToCategory((int)$id, $groupsCat);
+            } elseif ($name === 'Global Colors' && (int)$id !== $colorsCat) {
+                $this->MoveVariablesToCategory((int)$id, $colorsCat);
+            }
+        }
+    }
+
+    private function MoveVariablesToCategory($fromCatId, $toCatId)
+    {
+        $children = @IPS_GetChildrenIDs($fromCatId);
+        if (!is_array($children)) return;
+
+        foreach ($children as $id) {
+            $obj = @IPS_GetObject($id);
+            if (!is_array($obj)) continue;
+            if ((int)$obj['ObjectType'] === 2) {
+                if ((int)IPS_GetParent($id) != (int)$toCatId) {
+                    @IPS_SetParent($id, $toCatId);
+                }
+            }
+        }
+    }
     private function NormalizePercentVariables()
     {
         $varIds = $this->CollectVariableIds($this->InstanceID);
