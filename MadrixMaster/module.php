@@ -260,7 +260,6 @@ class MadrixMaster extends IPSModule
                 if ($vid > 0) {
                     @IPS_SetParent($vid, $cat);
                     IPS_SetVariableCustomProfile($vid, 'MADRIX.Percent');
-                    $this->EnableAction($ident);
                     $map[(string)$gid] = $vid;
                 }
             } else {
@@ -273,6 +272,7 @@ class MadrixMaster extends IPSModule
             }
 
             if ($this->GetIDForIdent($ident) > 0) {
+                $this->EnableAction($ident);
                 $this->SetValue($ident, $this->ByteToPercent($val));
             }
         }
