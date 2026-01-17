@@ -19,7 +19,7 @@ class MadrixMaster extends IPSModule
         $this->EnsureProfiles();
         $this->EnsureCategories();
 
-        $this->RegisterVariableInteger('Master', 'Master', 'MADRIX.Intensity255', 1);
+        $this->RegisterVariableInteger('Master', 'Master', 'MADRIX.Percent', 1);
         $this->EnableAction('Master');
 
         $this->RegisterVariableBoolean('Blackout', 'Blackout', 'MADRIX.Switch', 2);
@@ -32,6 +32,11 @@ class MadrixMaster extends IPSModule
 
         $this->EnsureProfiles();
         $this->EnsureCategories();
+
+        $mid = $this->GetIDForIdent('Master');
+        if ($mid > 0) {
+            IPS_SetVariableCustomProfile($mid, 'MADRIX.Percent');
+        }
     }
 
     // Damit MADRIX_ForceNameSync($id) auf Master nicht crasht: an Controller weiterleiten
@@ -64,6 +69,12 @@ class MadrixMaster extends IPSModule
             IPS_SetVariableProfileValues('MADRIX.Intensity255', 0, 255, 1);
         }
 
+        if (!IPS_VariableProfileExists('MADRIX.Percent')) {
+            IPS_CreateVariableProfile('MADRIX.Percent', 1);
+            IPS_SetVariableProfileValues('MADRIX.Percent', 0, 100, 1);
+            IPS_SetVariableProfileSuffix('MADRIX.Percent', ' %');
+        }
+
         if (!IPS_VariableProfileExists('MADRIX.Switch')) {
             IPS_CreateVariableProfile('MADRIX.Switch', 0);
             IPS_SetVariableProfileAssociation('MADRIX.Switch', 0, 'Aus', '', 0);
@@ -81,9 +92,12 @@ class MadrixMaster extends IPSModule
     {
         $cg = (int)$this->ReadAttributeInteger('CatGroups');
         if ($cg == 0 || !IPS_ObjectExists($cg)) {
-            $cg = IPS_CreateCategory();
-            @IPS_SetName($cg, 'Groups');
-            @IPS_SetParent($cg, $this->InstanceID);
+            $cg = $this->FindCategoryByName($this->InstanceID, 'Groups');
+            if ($cg == 0) {
+                $cg = IPS_CreateCategory();
+                @IPS_SetName($cg, 'Groups');
+                @IPS_SetParent($cg, $this->InstanceID);
+            }
             $this->WriteAttributeInteger('CatGroups', $cg);
         } else {
             if ((int)IPS_GetParent($cg) != (int)$this->InstanceID) @IPS_SetParent($cg, $this->InstanceID);
@@ -92,9 +106,12 @@ class MadrixMaster extends IPSModule
 
         $cc = (int)$this->ReadAttributeInteger('CatColors');
         if ($cc == 0 || !IPS_ObjectExists($cc)) {
-            $cc = IPS_CreateCategory();
-            @IPS_SetName($cc, 'Global Colors');
-            @IPS_SetParent($cc, $this->InstanceID);
+            $cc = $this->FindCategoryByName($this->InstanceID, 'Global Colors');
+            if ($cc == 0) {
+                $cc = IPS_CreateCategory();
+                @IPS_SetName($cc, 'Global Colors');
+                @IPS_SetParent($cc, $this->InstanceID);
+            }
             $this->WriteAttributeInteger('CatColors', $cc);
         } else {
             if ((int)IPS_GetParent($cc) != (int)$this->InstanceID) @IPS_SetParent($cc, $this->InstanceID);
@@ -112,10 +129,11 @@ class MadrixMaster extends IPSModule
     public function RequestAction($Ident, $Value)
     {
         if ($Ident == 'Master') {
-            $v = (int)$Value;
-            if ($v < 0) $v = 0;
-            if ($v > 255) $v = 255;
-            $this->SetValue('Master', $v);
+            $p = (int)$Value;
+            if ($p < 0) $p = 0;
+            if ($p > 100) $p = 100;
+            $v = $this->PercentToByte($p);
+            $this->SetValue('Master', $p);
             $this->SendToParent('SetMaster', $v);
             return;
         }
@@ -129,10 +147,11 @@ class MadrixMaster extends IPSModule
 
         if (substr($Ident, 0, 6) == 'Group_') {
             $gid = (int)substr($Ident, 6);
-            $val = (int)$Value;
-            if ($val < 0) $val = 0;
-            if ($val > 255) $val = 255;
-            $this->SetValue($Ident, $val);
+            $p = (int)$Value;
+            if ($p < 0) $p = 0;
+            if ($p > 100) $p = 100;
+            $val = $this->PercentToByte($p);
+            $this->SetValue($Ident, $p);
             $this->SendToParent('SetGroupValue', array('id' => $gid, 'value' => $val));
             return;
         }
@@ -162,7 +181,9 @@ class MadrixMaster extends IPSModule
         if (!isset($data['type']) || $data['type'] != 'status') return;
 
         if (isset($data['master']) && is_array($data['master'])) {
-            if (isset($data['master']['master'])) $this->SetValue('Master', (int)$data['master']['master']);
+            if (isset($data['master']['master'])) {
+                $this->SetValue('Master', $this->ByteToPercent((int)$data['master']['master']));
+            }
             if (isset($data['master']['blackout'])) $this->SetValue('Blackout', ((int)$data['master']['blackout'] == 1));
         }
 
@@ -188,19 +209,26 @@ class MadrixMaster extends IPSModule
             $ident = 'Group_' . $gid;
 
             if (!isset($map[(string)$gid]) || !IPS_ObjectExists((int)$map[(string)$gid])) {
-                $this->RegisterVariableInteger($ident, $name, 'MADRIX.Intensity255', 1000 + $gid);
+                $this->RegisterVariableInteger($ident, $name, 'MADRIX.Percent', 1000 + $gid);
                 $vid = $this->GetIDForIdent($ident);
                 if ($vid > 0) {
                     @IPS_SetParent($vid, $cat);
+                    IPS_SetVariableCustomProfile($vid, 'MADRIX.Percent');
                     $this->EnableAction($ident);
                     $map[(string)$gid] = $vid;
                 }
             } else {
                 $vid = (int)$map[(string)$gid];
-                if ($vid > 0 && IPS_ObjectExists($vid) && IPS_GetName($vid) != $name) @IPS_SetName($vid, $name);
+                if ($vid > 0 && IPS_ObjectExists($vid)) {
+                    if ((int)IPS_GetParent($vid) != (int)$cat) @IPS_SetParent($vid, $cat);
+                    if (IPS_GetName($vid) != $name) @IPS_SetName($vid, $name);
+                    IPS_SetVariableCustomProfile($vid, 'MADRIX.Percent');
+                }
             }
 
-            if ($this->GetIDForIdent($ident) > 0) $this->SetValue($ident, $val);
+            if ($this->GetIDForIdent($ident) > 0) {
+                $this->SetValue($ident, $this->ByteToPercent($val));
+            }
         }
 
         $this->SetBuffer('GroupVarMap', json_encode($map));
@@ -230,12 +258,17 @@ class MadrixMaster extends IPSModule
                 $vid = $this->GetIDForIdent($ident);
                 if ($vid > 0) {
                     @IPS_SetParent($vid, $cat);
+                    IPS_SetVariableCustomProfile($vid, 'MADRIX.HexColor');
                     $this->EnableAction($ident);
                     $map[(string)$cid] = $vid;
                 }
             } else {
                 $vid = (int)$map[(string)$cid];
-                if ($vid > 0 && IPS_ObjectExists($vid) && IPS_GetName($vid) != $name) @IPS_SetName($vid, $name);
+                if ($vid > 0 && IPS_ObjectExists($vid)) {
+                    if ((int)IPS_GetParent($vid) != (int)$cat) @IPS_SetParent($vid, $cat);
+                    if (IPS_GetName($vid) != $name) @IPS_SetName($vid, $name);
+                    IPS_SetVariableCustomProfile($vid, 'MADRIX.HexColor');
+                }
             }
 
             if ($this->GetIDForIdent($ident) > 0) $this->SetValue($ident, $hex);
@@ -256,5 +289,36 @@ class MadrixMaster extends IPSModule
         $arr = json_decode($raw, true);
         if (!is_array($arr)) $arr = array();
         return $arr;
+    }
+
+    private function FindCategoryByName($parentId, $name)
+    {
+        $children = @IPS_GetChildrenIDs($parentId);
+        if (!is_array($children)) return 0;
+
+        foreach ($children as $id) {
+            $obj = @IPS_GetObject($id);
+            if (!is_array($obj)) continue;
+            if ((int)$obj['ObjectType'] !== 0) continue;
+            if ((string)$obj['ObjectName'] === $name) return (int)$id;
+        }
+
+        return 0;
+    }
+
+    private function PercentToByte($p)
+    {
+        $x = (int)$p;
+        if ($x < 0) $x = 0;
+        if ($x > 100) $x = 100;
+        return (int)round(($x * 255) / 100);
+    }
+
+    private function ByteToPercent($b)
+    {
+        $x = (int)$b;
+        if ($x < 0) $x = 0;
+        if ($x > 255) $x = 255;
+        return (int)round(($x * 100) / 255);
     }
 }
