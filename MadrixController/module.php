@@ -532,23 +532,31 @@ class MadrixController extends IPSModule
                     $resp = array('ok' => $ok);
                 }
 
-            } elseif ($cmd == 'SetPlaceLayerIntensity') {
+            } elseif ($cmd == 'SetLayerOpacity') {
                 if (is_array($arg)) {
-                    $storage = isset($arg['storage']) ? (int)$arg['storage'] : 1;
-                    $place = isset($arg['place']) ? (int)$arg['place'] : 1;
+                    $deck = isset($arg['deck']) ? (string)$arg['deck'] : '';
                     $layer = isset($arg['layer']) ? (int)$arg['layer'] : 1;
                     $val = isset($arg['value']) ? (int)$arg['value'] : 0;
-                    $fn = isset($arg['function']) ? (string)$arg['function'] : 'SetStoragePlaceLayerIntensity';
 
-                    $storage = $this->ClampInt($storage, 1, 256);
-                    $place = $this->ClampInt($place, 1, 256);
-                    $layer = $this->ClampInt($layer, 1, 256);
+                    $layer = $this->ClampInt($layer, 1, 8);
                     $val = $this->ClampInt($val, 0, 255);
-                    if ($fn === '') $fn = 'SetStoragePlaceLayerIntensity';
 
-                    $param = 'S' . $storage . 'P' . $place . 'L' . $layer . '_' . $val;
-                    $this->HttpSet($fn, $param, $ok);
+                    $fn = '';
+                    if ($deck == 'A') {
+                        $fn = 'SetLayerOpacityDeckA';
+                    } elseif ($deck == 'B') {
+                        $fn = 'SetLayerOpacityDeckB';
+                    }
+
+                    if ($fn !== '') {
+                        $param = $layer . '_' . $val;
+                        $this->HttpSet($fn, $param, $ok);
+                    } else {
+                        $ok = false;
+                    }
+
                     if ($ok) {
+                        $this->MarkPending('Layer' . $deck . '_' . $layer, $val);
                         $this->AfterChange();
                     }
                     $resp = array('ok' => $ok);
@@ -833,6 +841,24 @@ class MadrixController extends IPSModule
             $storage = $this->ClampInt($storage, 1, 256);
         }
 
+        $layers = array();
+        $layerCount = 0;
+        if ($deckInstance > 0 && IPS_ObjectExists($deckInstance)) {
+            $layerCount = (int)@IPS_GetProperty($deckInstance, 'LayerCount');
+        }
+        if ($layerCount < 0) $layerCount = 0;
+        if ($layerCount > 8) $layerCount = 8;
+        if ($layerCount > 0) {
+            $prefix = ($deck == 'A') ? 'L' : 'R';
+            for ($i = 1; $i <= $layerCount; $i++) {
+                $okLayer = true;
+                $val = (int)$this->HttpGet('GetLayerOpacity', $prefix . $i, $okLayer);
+                if (!$okLayer) $val = 0;
+                $this->ResolvePendingIfReached('Layer' . $deck . '_' . $i, $val, 0);
+                $layers[] = array('layer' => $i, 'opacity' => $val);
+            }
+        }
+
         $desc = '';
         $lastKey = ($deck == 'A') ? 'LastDeckAPlace' : 'LastDeckBPlace';
         $lastPlace = (int)$this->GetBuffer($lastKey);
@@ -850,7 +876,8 @@ class MadrixController extends IPSModule
             'place' => $place,
             'speed' => $speed,
             'storage' => $storage,
-            'desc' => $desc
+            'desc' => $desc,
+            'layers' => $layers
         );
     }
 

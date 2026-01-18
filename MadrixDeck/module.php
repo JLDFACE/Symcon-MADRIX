@@ -95,16 +95,12 @@ class MadrixDeck extends IPSModule
 
             $on = ((bool)$Value) ? true : false;
             $this->SetValue($Ident, $on);
-
-            $storage = $this->GetStorage();
-            $place = $this->GetVarIntByIdent('Place', 1);
-            if ($place < 1) $place = 1;
-            if ($place > 256) $place = 256;
+            $this->SetPending($Ident, $on ? 1 : 0, 10);
 
             $val = $this->PercentToByte($on ? 100 : 0);
-            $this->SendToParent('SetPlaceLayerIntensity', array(
-                'storage' => $storage,
-                'place' => $place,
+            $deck = $this->GetDeck();
+            $this->SendToParent('SetLayerOpacity', array(
+                'deck' => $deck,
                 'layer' => $layer,
                 'value' => $val
             ));
@@ -161,12 +157,24 @@ class MadrixDeck extends IPSModule
             $place = isset($d['place']) ? (int)$d['place'] : null;
             $speed = isset($d['speed']) ? (float)$d['speed'] : null;
             $desc  = isset($d['desc']) ? (string)$d['desc'] : '';
+            $layers = isset($d['layers']) && is_array($d['layers']) ? $d['layers'] : null;
 
             if ($place !== null) $this->ApplyPolledWithPending('Place', $place, 0);
             if ($speed !== null) $this->ApplyPolledWithPending('Speed', $speed, 0.05);
 
             if ($place !== null) {
                 $this->UpdatePlaceAssociation($place, $desc);
+            }
+
+            if (is_array($layers)) {
+                foreach ($layers as $entry) {
+                    if (!is_array($entry)) continue;
+                    $layer = isset($entry['layer']) ? (int)$entry['layer'] : 0;
+                    if ($layer <= 0) continue;
+                    $opacity = isset($entry['opacity']) ? (int)$entry['opacity'] : 0;
+                    $on = ($opacity > 0) ? 1 : 0;
+                    $this->ApplyPolledWithPending('Layer_' . $layer, $on, 0);
+                }
             }
         }
     }
@@ -237,7 +245,7 @@ class MadrixDeck extends IPSModule
     {
         $c = (int)$this->ReadPropertyInteger('LayerCount');
         if ($c < 0) $c = 0;
-        if ($c > 32) $c = 32;
+        if ($c > 8) $c = 8;
         return $c;
     }
 

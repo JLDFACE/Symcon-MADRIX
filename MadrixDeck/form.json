@@ -25,9 +25,9 @@
     {
       "type": "NumberSpinner",
       "name": "LayerCount",
-      "caption": "Ebenen (0..32)",
+      "caption": "Ebenen (0..8)",
       "minimum": 0,
-      "maximum": 32
+      "maximum": 8
     }
   ],
   "actions": [
