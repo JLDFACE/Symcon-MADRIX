@@ -296,6 +296,9 @@ class MadrixMaster extends IPSModule
             $vid = 0;
             if (!isset($map[(string)$gid]) || !IPS_ObjectExists((int)$map[(string)$gid])) {
                 $this->RegisterVariableInteger($ident, $name, 'MADRIX.Percent', 1000 + $gid);
+                if (method_exists($this, 'EnableAction')) {
+                    $this->EnableAction($ident);
+                }
                 $vid = $this->GetIDForIdent($ident);
                 if ($vid > 0) {
                     @IPS_SetParent($vid, $cat);
@@ -314,6 +317,9 @@ class MadrixMaster extends IPSModule
             $svid = 0;
             if (!isset($switchMap[(string)$gid]) || !IPS_ObjectExists((int)$switchMap[(string)$gid])) {
                 $this->RegisterVariableBoolean($switchIdent, $switchName, 'MADRIX.Switch', 1100 + $gid);
+                if (method_exists($this, 'EnableAction')) {
+                    $this->EnableAction($switchIdent);
+                }
                 $svid = $this->GetIDForIdent($switchIdent);
                 if ($svid > 0) {
                     @IPS_SetParent($svid, $cat);
@@ -390,6 +396,9 @@ class MadrixMaster extends IPSModule
 
             if (!isset($map[(string)$cid]) || !IPS_ObjectExists((int)$map[(string)$cid])) {
                 $this->RegisterVariableInteger($ident, $name, 'MADRIX.HexColor', 2000 + $cid);
+                if (method_exists($this, 'EnableAction')) {
+                    $this->EnableAction($ident);
+                }
                 $vid = $this->GetIDForIdent($ident);
                 if ($vid > 0) {
                     @IPS_SetParent($vid, $cat);
