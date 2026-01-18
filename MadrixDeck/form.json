@@ -21,6 +21,13 @@
       "caption": "Storage (1..256)",
       "minimum": 1,
       "maximum": 256
+    },
+    {
+      "type": "NumberSpinner",
+      "name": "LayerCount",
+      "caption": "Ebenen (0..32)",
+      "minimum": 0,
+      "maximum": 32
     }
   ],
   "actions": [

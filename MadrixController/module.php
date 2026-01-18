@@ -532,6 +532,28 @@ class MadrixController extends IPSModule
                     $resp = array('ok' => $ok);
                 }
 
+            } elseif ($cmd == 'SetPlaceLayerIntensity') {
+                if (is_array($arg)) {
+                    $storage = isset($arg['storage']) ? (int)$arg['storage'] : 1;
+                    $place = isset($arg['place']) ? (int)$arg['place'] : 1;
+                    $layer = isset($arg['layer']) ? (int)$arg['layer'] : 1;
+                    $val = isset($arg['value']) ? (int)$arg['value'] : 0;
+                    $fn = isset($arg['function']) ? (string)$arg['function'] : 'SetStoragePlaceLayerIntensity';
+
+                    $storage = $this->ClampInt($storage, 1, 256);
+                    $place = $this->ClampInt($place, 1, 256);
+                    $layer = $this->ClampInt($layer, 1, 256);
+                    $val = $this->ClampInt($val, 0, 255);
+                    if ($fn === '') $fn = 'SetStoragePlaceLayerIntensity';
+
+                    $param = 'S' . $storage . 'P' . $place . 'L' . $layer . '_' . $val;
+                    $this->HttpSet($fn, $param, $ok);
+                    if ($ok) {
+                        $this->AfterChange();
+                    }
+                    $resp = array('ok' => $ok);
+                }
+
             } elseif ($cmd == 'SetFadeType') {
                 $t = trim((string)$arg);
                 if ($t !== '') {

@@ -10,6 +10,7 @@ class MadrixDeck extends IPSModule
 
         $this->RegisterPropertyString('Deck', 'A');
         $this->RegisterPropertyInteger('Storage', 1);
+        $this->RegisterPropertyInteger('LayerCount', 8);
 
         $this->SetBuffer('Pending', json_encode(array()));
         $this->SetBuffer('DescCache', json_encode(array())); // place(string) => desc
@@ -28,6 +29,7 @@ class MadrixDeck extends IPSModule
         parent::ApplyChanges();
 
         $this->EnsureProfiles();
+        $this->EnsureLayerVars();
 
         $deck = $this->GetDeck();
 
@@ -84,6 +86,28 @@ class MadrixDeck extends IPSModule
 
             $deck = $this->GetDeck();
             $this->SendToParent('SetDeckSpeed', array('deck' => $deck, 'speed' => $speed));
+            return;
+        }
+
+        if (substr($Ident, 0, 6) == 'Layer_') {
+            $layer = (int)substr($Ident, 6);
+            if ($layer <= 0) return;
+
+            $on = ((bool)$Value) ? true : false;
+            $this->SetValue($Ident, $on);
+
+            $storage = $this->GetStorage();
+            $place = $this->GetVarIntByIdent('Place', 1);
+            if ($place < 1) $place = 1;
+            if ($place > 256) $place = 256;
+
+            $val = $this->PercentToByte($on ? 100 : 0);
+            $this->SendToParent('SetPlaceLayerIntensity', array(
+                'storage' => $storage,
+                'place' => $place,
+                'layer' => $layer,
+                'value' => $val
+            ));
             return;
         }
     }
@@ -160,6 +184,61 @@ class MadrixDeck extends IPSModule
             IPS_SetVariableProfileValues('MADRIX.Speed', -10, 10, 0.1);
             IPS_SetVariableProfileDigits('MADRIX.Speed', 1);
         }
+
+        if (!IPS_VariableProfileExists('MADRIX.Switch')) {
+            IPS_CreateVariableProfile('MADRIX.Switch', 0);
+            IPS_SetVariableProfileAssociation('MADRIX.Switch', 0, 'Aus', '', 0);
+            IPS_SetVariableProfileAssociation('MADRIX.Switch', 1, 'Ein', '', 0);
+        }
+    }
+
+    private function EnsureLayerVars()
+    {
+        $count = $this->GetLayerCount();
+        $deck = $this->GetDeck();
+
+        $existing = array(); // layer => varId
+        $children = @IPS_GetChildrenIDs($this->InstanceID);
+        if (is_array($children)) {
+            foreach ($children as $id) {
+                $obj = @IPS_GetObject($id);
+                if (!is_array($obj)) continue;
+                if ((int)$obj['ObjectType'] !== 2) continue;
+                $ident = (string)$obj['ObjectIdent'];
+                if (strpos($ident, 'Layer_') !== 0) continue;
+                $layer = (int)substr($ident, 6);
+                if ($layer > 0) $existing[$layer] = (int)$id;
+            }
+        }
+
+        for ($i = 1; $i <= $count; $i++) {
+            $ident = 'Layer_' . $i;
+            $name = 'Deck ' . $deck . ' Layer ' . $i;
+
+            if (isset($existing[$i]) && IPS_ObjectExists((int)$existing[$i])) {
+                $vid = (int)$existing[$i];
+                if (IPS_GetName($vid) != $name) IPS_SetName($vid, $name);
+                IPS_SetVariableCustomProfile($vid, 'MADRIX.Switch');
+                $this->EnableAction($ident);
+            } else {
+                $this->RegisterVariableBoolean($ident, $name, 'MADRIX.Switch', 30 + $i);
+                $this->EnableAction($ident);
+            }
+        }
+
+        foreach ($existing as $layer => $vid) {
+            if ($layer > $count && IPS_ObjectExists($vid)) {
+                @IPS_DeleteObject($vid);
+            }
+        }
+    }
+
+    private function GetLayerCount()
+    {
+        $c = (int)$this->ReadPropertyInteger('LayerCount');
+        if ($c < 0) $c = 0;
+        if ($c > 32) $c = 32;
+        return $c;
     }
 
     private function GetPlaceProfile()
@@ -286,5 +365,13 @@ class MadrixDeck extends IPSModule
         if ($b === null) return false;
         if ($epsilon <= 0) return ((string)$a === (string)$b);
         return abs((float)$a - (float)$b) <= (float)$epsilon;
+    }
+
+    private function PercentToByte($p)
+    {
+        $x = (int)$p;
+        if ($x < 0) $x = 0;
+        if ($x > 100) $x = 100;
+        return (int)round(($x * 255) / 100);
     }
 }
