@@ -184,6 +184,9 @@ class MadrixMaster extends IPSModule
             $gid = (int)substr($Ident, 12);
             $on = ((bool)$Value) ? true : false;
 
+            $groupVid = $this->GetGroupVarId($gid);
+            $switchVid = $this->GetGroupSwitchVarId($gid);
+
             $target = 0;
             if ($on) {
                 $current = $this->GetCurrentGroupPercent($gid);
@@ -195,8 +198,12 @@ class MadrixMaster extends IPSModule
                 }
             }
 
-            $this->SetValue($Ident, $on);
-            $this->SetValue('Group_' . $gid, $target);
+            if ($switchVid > 0) {
+                @SetValueBoolean($switchVid, $on);
+            }
+            if ($groupVid > 0) {
+                @SetValueInteger($groupVid, $target);
+            }
             $this->UpdateGroupLastPercent($gid, $target);
 
             $val = $this->PercentToByte($target);
@@ -210,7 +217,10 @@ class MadrixMaster extends IPSModule
             if ($p < 0) $p = 0;
             if ($p > 100) $p = 100;
             $val = $this->PercentToByte($p);
-            $this->SetValue($Ident, $p);
+            $vid = $this->GetGroupVarId($gid);
+            if ($vid > 0) {
+                @SetValueInteger($vid, $p);
+            }
             $this->SetGroupSwitchFromPercent($gid, $p);
             $this->UpdateGroupLastPercent($gid, $p);
             $this->SendToParent('SetGroupValue', array('id' => $gid, 'value' => $val));
@@ -554,17 +564,67 @@ class MadrixMaster extends IPSModule
 
     private function GetCurrentGroupPercent($gid)
     {
-        $vid = $this->GetIDForIdent('Group_' . $gid);
-        if ($vid <= 0 || !IPS_ObjectExists($vid)) return 0;
+        $vid = $this->GetGroupVarId($gid);
+        if ($vid <= 0) return 0;
         return (int)@GetValueInteger($vid);
     }
 
     private function SetGroupSwitchFromPercent($gid, $percent)
     {
-        $vid = $this->GetIDForIdent('GroupSwitch_' . $gid);
-        if ($vid <= 0 || !IPS_ObjectExists($vid)) return;
+        $vid = $this->GetGroupSwitchVarId($gid);
+        if ($vid <= 0) return;
         $on = ((int)$percent > 0);
         @SetValueBoolean($vid, $on);
+    }
+
+    private function GetGroupVarId($gid)
+    {
+        $map = $this->GetJsonBuffer('GroupVarMap');
+        $key = (string)$gid;
+        if (isset($map[$key]) && IPS_ObjectExists((int)$map[$key])) {
+            return (int)$map[$key];
+        }
+
+        $cat = (int)$this->ReadAttributeInteger('CatGroups');
+        $vid = $this->FindChildVariableByIdent($cat, 'Group_' . $gid);
+        if ($vid > 0) {
+            $map[$key] = $vid;
+            $this->SetBuffer('GroupVarMap', json_encode($map));
+        }
+        return $vid;
+    }
+
+    private function GetGroupSwitchVarId($gid)
+    {
+        $map = $this->GetJsonBuffer('GroupSwitchVarMap');
+        $key = (string)$gid;
+        if (isset($map[$key]) && IPS_ObjectExists((int)$map[$key])) {
+            return (int)$map[$key];
+        }
+
+        $cat = (int)$this->ReadAttributeInteger('CatGroups');
+        $vid = $this->FindChildVariableByIdent($cat, 'GroupSwitch_' . $gid);
+        if ($vid > 0) {
+            $map[$key] = $vid;
+            $this->SetBuffer('GroupSwitchVarMap', json_encode($map));
+        }
+        return $vid;
+    }
+
+    private function FindChildVariableByIdent($parentId, $ident)
+    {
+        if ($parentId <= 0 || !IPS_ObjectExists($parentId)) return 0;
+        $children = @IPS_GetChildrenIDs($parentId);
+        if (!is_array($children)) return 0;
+
+        foreach ($children as $id) {
+            $obj = @IPS_GetObject($id);
+            if (!is_array($obj)) continue;
+            if ((int)$obj['ObjectType'] !== 2) continue;
+            if ((string)$obj['ObjectIdent'] === $ident) return (int)$id;
+        }
+
+        return 0;
     }
 
     private function CollectVariableIds($parentId)
