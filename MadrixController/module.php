@@ -85,8 +85,12 @@ class MadrixController extends IPSModule
     {
         if (!IPS_VariableProfileExists('MADRIX.Percent')) {
             IPS_CreateVariableProfile('MADRIX.Percent', 1);
-            IPS_SetVariableProfileValues('MADRIX.Percent', 0, 100, 1);
+        }
+        IPS_SetVariableProfileValues('MADRIX.Percent', 0, 100, 1);
+        if (function_exists('IPS_SetVariableProfileSuffix')) {
             IPS_SetVariableProfileSuffix('MADRIX.Percent', ' %');
+        } else {
+            IPS_SetVariableProfileText('MADRIX.Percent', '', ' %');
         }
 
         if (!IPS_VariableProfileExists('MADRIX.Switch')) {
