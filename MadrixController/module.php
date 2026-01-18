@@ -851,17 +851,22 @@ class MadrixController extends IPSModule
         if ($layerCount < 0) $layerCount = 0;
         if ($layerCount > 8) $layerCount = 8;
         if ($layerCount > 0) {
-            $getLayerFn = ($deck == 'A') ? 'GetLayerDeckA' : 'GetLayerDeckB';
-            $getNameFn = ($deck == 'A') ? 'GetLayerNameDeckA' : 'GetLayerNameDeckB';
+            if ($forceDesc) {
+                $layerNames = $this->SyncLayerNames($deck, $layerCount, $layerNames);
+                $this->SetLayerNameCache($deck, $layerNames);
+            } else {
+                $getLayerFn = ($deck == 'A') ? 'GetLayerDeckA' : 'GetLayerDeckB';
+                $getNameFn = ($deck == 'A') ? 'GetLayerNameDeckA' : 'GetLayerNameDeckB';
 
-            $okLayer = true;
-            $currentLayer = (int)$this->HttpGet($getLayerFn, null, $okLayer);
-            if ($okLayer && $currentLayer >= 1 && $currentLayer <= $layerCount) {
-                $okName = true;
-                $name = trim((string)$this->HttpGet($getNameFn, null, $okName));
-                if ($okName) {
-                    $layerNames[(string)$currentLayer] = $name;
-                    $this->SetLayerNameCache($deck, $layerNames);
+                $okLayer = true;
+                $currentLayer = (int)$this->HttpGet($getLayerFn, null, $okLayer);
+                if ($okLayer && $currentLayer >= 1 && $currentLayer <= $layerCount) {
+                    $okName = true;
+                    $name = trim((string)$this->HttpGet($getNameFn, null, $okName));
+                    if ($okName) {
+                        $layerNames[(string)$currentLayer] = $name;
+                        $this->SetLayerNameCache($deck, $layerNames);
+                    }
                 }
             }
         }
@@ -915,6 +920,61 @@ class MadrixController extends IPSModule
         $this->SetBuffer('LayerNameCache' . $deck, json_encode($arr));
     }
 
+    private function SyncLayerNames($deck, $count, $cache)
+    {
+        $names = is_array($cache) ? $cache : array();
+        if ($count <= 0) return $names;
+
+        $getLayerFn = ($deck == 'A') ? 'GetLayerDeckA' : 'GetLayerDeckB';
+        $setLayerFn = ($deck == 'A') ? 'SetLayerDeckA' : 'SetLayerDeckB';
+        $getNameFn = ($deck == 'A') ? 'GetLayerNameDeckA' : 'GetLayerNameDeckB';
+
+        $ok = true;
+        $current = (int)$this->HttpGet($getLayerFn, null, $ok);
+        if (!$ok) return $names;
+        $current = $this->ClampInt($current, 1, $count);
+
+        for ($i = 1; $i <= $count; $i++) {
+            if ($i != $current) {
+                $okSet = true;
+                $this->HttpSet($setLayerFn, (string)$i, $okSet);
+                if (!$okSet) continue;
+            }
+
+            if (!$this->WaitForLayer($deck, $i)) continue;
+
+            $okName = true;
+            $name = trim((string)$this->HttpGet($getNameFn, null, $okName));
+            if ($okName) {
+                $names[(string)$i] = $name;
+            }
+        }
+
+        if ($current > 0) {
+            $okSet = true;
+            $this->HttpSet($setLayerFn, (string)$current, $okSet);
+            if ($okSet) {
+                $this->WaitForLayer($deck, $current);
+            }
+        }
+
+        return $names;
+    }
+
+    private function WaitForLayer($deck, $target)
+    {
+        $getLayerFn = ($deck == 'A') ? 'GetLayerDeckA' : 'GetLayerDeckB';
+        $target = $this->ClampInt((int)$target, 1, 8);
+
+        for ($i = 0; $i < 8; $i++) {
+            $ok = true;
+            $cur = (int)$this->HttpGet($getLayerFn, null, $ok);
+            if ($ok && $cur === $target) return true;
+            usleep(100000);
+        }
+
+        return false;
+    }
 
     private function PollAllGroups($forceNames)
     {
