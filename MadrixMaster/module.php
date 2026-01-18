@@ -278,7 +278,7 @@ class MadrixMaster extends IPSModule
                 if ($curIdent !== $ident) {
                     @IPS_SetIdent($vid, $ident);
                 }
-                @IPS_SetVariableCustomAction($vid, $this->InstanceID);
+                $this->EnableAction($ident);
                 @SetValueInteger($vid, $this->ByteToPercent($val));
             }
         }
@@ -427,7 +427,7 @@ class MadrixMaster extends IPSModule
                 if ($ident === 'Master') {
                     $this->EnableAction('Master');
                 } else {
-                    @IPS_SetVariableCustomAction($vid, $this->InstanceID);
+                    $this->EnableAction($ident);
                 }
                 $val = (int)@GetValueInteger($vid);
                 if ($val > 100) {
