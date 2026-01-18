@@ -47,6 +47,7 @@ class MadrixMaster extends IPSModule
         }
 
         $this->NormalizePercentVariables();
+        $this->NormalizeGroupSwitchVariables();
         $this->NormalizeCategories();
 
         $this->ApplyCrossfaderConfig();
@@ -73,9 +74,9 @@ class MadrixMaster extends IPSModule
 
         if (!IPS_VariableProfileExists('MADRIX.Percent')) {
             IPS_CreateVariableProfile('MADRIX.Percent', 1);
-            IPS_SetVariableProfileValues('MADRIX.Percent', 0, 100, 1);
-            IPS_SetVariableProfileSuffix('MADRIX.Percent', ' %');
         }
+        IPS_SetVariableProfileValues('MADRIX.Percent', 0, 100, 1);
+        IPS_SetVariableProfileSuffix('MADRIX.Percent', ' %');
 
         if (!IPS_VariableProfileExists('MADRIX.Switch')) {
             IPS_CreateVariableProfile('MADRIX.Switch', 0);
@@ -279,13 +280,14 @@ class MadrixMaster extends IPSModule
             $gid = isset($g['id']) ? (int)$g['id'] : 0;
             if ($gid <= 0) continue;
 
-            $name = isset($g['name']) ? (string)$g['name'] : ('Group ' . $gid);
+            $rawName = isset($g['name']) ? (string)$g['name'] : ('Group ' . $gid);
             $val = isset($g['val']) ? (int)$g['val'] : 0;
             $percent = $this->ByteToPercent($val);
 
             $ident = 'Group_' . $gid;
+            $name = $gid . '. ' . $rawName;
             $switchIdent = 'GroupSwitch_' . $gid;
-            $switchName = $name . ' On';
+            $switchName = $name . ' Schalter';
 
             $vid = 0;
             if (!isset($map[(string)$gid]) || !IPS_ObjectExists((int)$map[(string)$gid])) {
@@ -501,6 +503,23 @@ class MadrixMaster extends IPSModule
                 if ($val > 100) {
                     $this->SetValue($ident, $this->ByteToPercent($val));
                 }
+            }
+        }
+    }
+
+    private function NormalizeGroupSwitchVariables()
+    {
+        $varIds = $this->CollectVariableIds($this->InstanceID);
+        $switchPrefix = 'GroupSwitch_';
+
+        foreach ($varIds as $vid) {
+            if ($vid <= 0 || !IPS_ObjectExists($vid)) continue;
+            $obj = @IPS_GetObject($vid);
+            $ident = is_array($obj) ? (string)$obj['ObjectIdent'] : '';
+
+            if (strpos($ident, $switchPrefix) === 0) {
+                IPS_SetVariableCustomProfile($vid, 'MADRIX.Switch');
+                $this->EnableAction($ident);
             }
         }
     }
