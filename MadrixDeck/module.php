@@ -266,7 +266,7 @@ class MadrixDeck extends IPSModule
             }
 
             $display = $this->GetLayerDisplayName($i, $name);
-            $vid = $this->GetIDForIdent('Layer_' . $i);
+            $vid = $this->GetLayerVarId($i);
             if ($vid > 0 && IPS_ObjectExists($vid)) {
                 if (IPS_GetName($vid) != $display) {
                     IPS_SetName($vid, $display);
@@ -282,6 +282,25 @@ class MadrixDeck extends IPSModule
         $t = trim((string)$name);
         if ($t === '') return $base;
         return $base . ': ' . $t;
+    }
+
+    private function GetLayerVarId($layer)
+    {
+        $ident = 'Layer_' . (int)$layer;
+        $vid = $this->GetIDForIdent($ident);
+        if ($vid > 0 && IPS_ObjectExists($vid)) return $vid;
+
+        $children = @IPS_GetChildrenIDs($this->InstanceID);
+        if (!is_array($children)) return 0;
+
+        foreach ($children as $id) {
+            $obj = @IPS_GetObject($id);
+            if (!is_array($obj)) continue;
+            if ((int)$obj['ObjectType'] !== 2) continue;
+            if ((string)$obj['ObjectIdent'] === $ident) return (int)$id;
+        }
+
+        return 0;
     }
 
     private function GetPlaceProfile()
@@ -365,6 +384,9 @@ class MadrixDeck extends IPSModule
         $pending = $this->GetPending();
         $now = time();
 
+        $vid = $this->GetVariableIdForIdent($ident);
+        if ($vid <= 0) return;
+
         if (isset($pending[$ident])) {
             $p = $pending[$ident];
             $deadline = isset($p['deadline']) ? (int)$p['deadline'] : 0;
@@ -374,17 +396,17 @@ class MadrixDeck extends IPSModule
                 if ($this->Matches($polledValue, $desired, $epsilon)) {
                     unset($pending[$ident]);
                     $this->SetBuffer('Pending', json_encode($pending));
-                    $this->SetValue($ident, $polledValue);
+                    $this->SetValueById($vid, $polledValue);
                 } else {
                     return;
                 }
             } else {
                 unset($pending[$ident]);
                 $this->SetBuffer('Pending', json_encode($pending));
-                $this->SetValue($ident, $polledValue);
+                $this->SetValueById($vid, $polledValue);
             }
         } else {
-            $this->SetValue($ident, $polledValue);
+            $this->SetValueById($vid, $polledValue);
         }
     }
 
@@ -416,5 +438,37 @@ class MadrixDeck extends IPSModule
         if ($x < 0) $x = 0;
         if ($x > 100) $x = 100;
         return (int)round(($x * 255) / 100);
+    }
+
+    private function GetVariableIdForIdent($ident)
+    {
+        if (substr($ident, 0, 6) == 'Layer_') {
+            return $this->GetLayerVarId((int)substr($ident, 6));
+        }
+
+        $vid = $this->GetIDForIdent($ident);
+        if ($vid > 0 && IPS_ObjectExists($vid)) return $vid;
+        return 0;
+    }
+
+    private function SetValueById($vid, $value)
+    {
+        if ($vid <= 0 || !IPS_ObjectExists($vid)) return;
+        $obj = @IPS_GetObject($vid);
+        $type = is_array($obj) ? (int)$obj['ObjectType'] : 0;
+        if ($type !== 2) return;
+
+        $var = @IPS_GetVariable($vid);
+        $vt = is_array($var) ? (int)$var['VariableType'] : 0;
+
+        if ($vt === 0) {
+            @SetValueBoolean($vid, (bool)$value);
+        } elseif ($vt === 1) {
+            @SetValueInteger($vid, (int)$value);
+        } elseif ($vt === 2) {
+            @SetValueFloat($vid, (float)$value);
+        } else {
+            @SetValueString($vid, (string)$value);
+        }
     }
 }
