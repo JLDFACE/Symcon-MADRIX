@@ -46,6 +46,8 @@ class MadrixController extends IPSModule
         $this->SetBuffer('GroupNameCache', json_encode(array())); // id(string) => name
         $this->SetBuffer('LastDeckAPlace', '0');
         $this->SetBuffer('LastDeckBPlace', '0');
+        $this->SetBuffer('LayerNameCacheA', json_encode(array())); // layer(string) => name
+        $this->SetBuffer('LayerNameCacheB', json_encode(array())); // layer(string) => name
 
         // Name sync Steuerung
         $this->SetBuffer('ForceNameSync', '0'); // 1 => beim nächsten Poll Descriptions/Names holen
@@ -841,13 +843,19 @@ class MadrixController extends IPSModule
             $storage = $this->ClampInt($storage, 1, 256);
         }
 
-        $layers = array();
+        $layerNames = $this->GetLayerNameCache($deck);
         $layerCount = 0;
         if ($deckInstance > 0 && IPS_ObjectExists($deckInstance)) {
             $layerCount = (int)@IPS_GetProperty($deckInstance, 'LayerCount');
         }
         if ($layerCount < 0) $layerCount = 0;
         if ($layerCount > 8) $layerCount = 8;
+        if ($forceDesc && $layerCount > 0) {
+            $layerNames = $this->SyncLayerNames($deck, $layerCount, $layerNames);
+            $this->SetLayerNameCache($deck, $layerNames);
+        }
+
+        $layers = array();
         if ($layerCount > 0) {
             $prefix = ($deck == 'A') ? 'L' : 'R';
             for ($i = 1; $i <= $layerCount; $i++) {
@@ -877,8 +885,59 @@ class MadrixController extends IPSModule
             'speed' => $speed,
             'storage' => $storage,
             'desc' => $desc,
-            'layers' => $layers
+            'layers' => $layers,
+            'layerNames' => $layerNames
         );
+    }
+
+    private function GetLayerNameCache($deck)
+    {
+        $buf = $this->GetBuffer('LayerNameCache' . $deck);
+        $arr = json_decode($buf, true);
+        if (!is_array($arr)) $arr = array();
+        return $arr;
+    }
+
+    private function SetLayerNameCache($deck, $arr)
+    {
+        if (!is_array($arr)) $arr = array();
+        $this->SetBuffer('LayerNameCache' . $deck, json_encode($arr));
+    }
+
+    private function SyncLayerNames($deck, $count, $cache)
+    {
+        $names = is_array($cache) ? $cache : array();
+        if ($count <= 0) return $names;
+
+        $getLayerFn = ($deck == 'A') ? 'GetLayerDeckA' : 'GetLayerDeckB';
+        $setLayerFn = ($deck == 'A') ? 'SetLayerDeckA' : 'SetLayerDeckB';
+        $getNameFn = ($deck == 'A') ? 'GetLayerNameDeckA' : 'GetLayerNameDeckB';
+
+        $ok = true;
+        $current = (int)$this->HttpGet($getLayerFn, null, $ok);
+        if (!$ok) return $names;
+        if ($current < 1) $current = 1;
+        if ($current > $count) $current = $count;
+
+        for ($i = 1; $i <= $count; $i++) {
+            if ($i != $current) {
+                $okSet = true;
+                $this->HttpSet($setLayerFn, (string)$i, $okSet);
+            }
+
+            $okName = true;
+            $name = trim((string)$this->HttpGet($getNameFn, null, $okName));
+            if ($okName) {
+                $names[(string)$i] = $name;
+            }
+        }
+
+        if ($current > 0) {
+            $okSet = true;
+            $this->HttpSet($setLayerFn, (string)$current, $okSet);
+        }
+
+        return $names;
     }
 
     private function PollAllGroups($forceNames)

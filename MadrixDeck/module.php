@@ -158,6 +158,7 @@ class MadrixDeck extends IPSModule
             $speed = isset($d['speed']) ? (float)$d['speed'] : null;
             $desc  = isset($d['desc']) ? (string)$d['desc'] : '';
             $layers = isset($d['layers']) && is_array($d['layers']) ? $d['layers'] : null;
+            $layerNames = isset($d['layerNames']) && is_array($d['layerNames']) ? $d['layerNames'] : null;
 
             if ($place !== null) $this->ApplyPolledWithPending('Place', $place, 0);
             if ($speed !== null) $this->ApplyPolledWithPending('Speed', $speed, 0.05);
@@ -175,6 +176,10 @@ class MadrixDeck extends IPSModule
                     $on = ($opacity > 0) ? 1 : 0;
                     $this->ApplyPolledWithPending('Layer_' . $layer, $on, 0);
                 }
+            }
+
+            if (is_array($layerNames)) {
+                $this->UpdateLayerNames($layerNames);
             }
         }
     }
@@ -247,6 +252,36 @@ class MadrixDeck extends IPSModule
         if ($c < 0) $c = 0;
         if ($c > 8) $c = 8;
         return $c;
+    }
+
+    private function UpdateLayerNames($layerNames)
+    {
+        $count = $this->GetLayerCount();
+        if ($count <= 0) return;
+
+        for ($i = 1; $i <= $count; $i++) {
+            $name = '';
+            if (isset($layerNames[(string)$i])) {
+                $name = (string)$layerNames[(string)$i];
+            }
+
+            $display = $this->GetLayerDisplayName($i, $name);
+            $vid = $this->GetIDForIdent('Layer_' . $i);
+            if ($vid > 0 && IPS_ObjectExists($vid)) {
+                if (IPS_GetName($vid) != $display) {
+                    IPS_SetName($vid, $display);
+                }
+            }
+        }
+    }
+
+    private function GetLayerDisplayName($layer, $name)
+    {
+        $deck = $this->GetDeck();
+        $base = 'Deck ' . $deck . ' Layer ' . (int)$layer;
+        $t = trim((string)$name);
+        if ($t === '') return $base;
+        return $base . ': ' . $t;
     }
 
     private function GetPlaceProfile()
