@@ -852,7 +852,7 @@ class MadrixController extends IPSModule
         if ($layerCount > 8) $layerCount = 8;
         if ($layerCount > 0) {
             if ($forceDesc) {
-                $layerNames = $this->SyncLayerNames($deck, $layerCount, $layerNames);
+                $layerNames = $this->SyncLayerNames($deck, $layerCount, array());
                 $this->SetLayerNameCache($deck, $layerNames);
             } else {
                 $getLayerFn = ($deck == 'A') ? 'GetLayerDeckA' : 'GetLayerDeckB';
@@ -935,14 +935,23 @@ class MadrixController extends IPSModule
         $current = $this->ClampInt($current, 1, $count);
 
         for ($i = 1; $i <= $count; $i++) {
-            if ($i != $current) {
+            $switched = false;
+            for ($t = 0; $t < 3; $t++) {
                 $okSet = true;
                 $this->HttpSet($setLayerFn, (string)$i, $okSet);
-                if (!$okSet) continue;
+                if (!$okSet) {
+                    usleep(100000);
+                    continue;
+                }
+                if ($this->WaitForLayer($deck, $i)) {
+                    $switched = true;
+                    break;
+                }
+                usleep(100000);
             }
+            if (!$switched) continue;
 
-            if (!$this->WaitForLayer($deck, $i)) continue;
-
+            usleep(200000);
             $okName = true;
             $name = trim((string)$this->HttpGet($getNameFn, null, $okName));
             if ($okName) {
@@ -966,7 +975,7 @@ class MadrixController extends IPSModule
         $getLayerFn = ($deck == 'A') ? 'GetLayerDeckA' : 'GetLayerDeckB';
         $target = $this->ClampInt((int)$target, 1, 8);
 
-        for ($i = 0; $i < 8; $i++) {
+        for ($i = 0; $i < 15; $i++) {
             $ok = true;
             $cur = (int)$this->HttpGet($getLayerFn, null, $ok);
             if ($ok && $cur === $target) return true;
