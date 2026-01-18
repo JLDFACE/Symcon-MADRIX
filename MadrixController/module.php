@@ -62,15 +62,6 @@ class MadrixController extends IPSModule
         // Eigene Profile anlegen
         $this->EnsureProfiles();
 
-        // Diagnose
-        $this->RegisterVariableBoolean('Online', 'Online', 'MADRIX.Online', 1);
-        $this->RegisterVariableString('LastError', 'LastError', '', 2);
-
-        // Scan Diagnose/UI
-        $this->RegisterVariableBoolean('ScanRunning', 'Place Scan Running', 'MADRIX.Switch', 20);
-        $this->RegisterVariableInteger('ScanProgress', 'Place Scan Progress (%)', 'MADRIX.Percent', 21);
-        $this->RegisterVariableString('ScanInfo', 'Place Scan Info', '', 22);
-        $this->RegisterVariableString('ScanLastRun', 'Place Scan Last Run', '', 23);
     }
 
     public function ApplyChanges()
@@ -79,6 +70,7 @@ class MadrixController extends IPSModule
 
         $this->EnsureProfiles();
         $this->EnsureDevices();
+        $this->CleanupLegacyVariables();
         $this->UpdatePollInterval(false);
 
         if (trim($this->ReadPropertyString('Host')) === '') {
@@ -91,12 +83,6 @@ class MadrixController extends IPSModule
 
     private function EnsureProfiles()
     {
-        if (!IPS_VariableProfileExists('MADRIX.Online')) {
-            IPS_CreateVariableProfile('MADRIX.Online', 0);
-            IPS_SetVariableProfileAssociation('MADRIX.Online', 0, 'Offline', '', 0);
-            IPS_SetVariableProfileAssociation('MADRIX.Online', 1, 'Online', '', 0);
-        }
-
         if (!IPS_VariableProfileExists('MADRIX.Percent')) {
             IPS_CreateVariableProfile('MADRIX.Percent', 1);
             IPS_SetVariableProfileValues('MADRIX.Percent', 0, 100, 1);
@@ -107,6 +93,17 @@ class MadrixController extends IPSModule
             IPS_CreateVariableProfile('MADRIX.Switch', 0);
             IPS_SetVariableProfileAssociation('MADRIX.Switch', 0, 'Aus', '', 0);
             IPS_SetVariableProfileAssociation('MADRIX.Switch', 1, 'Ein', '', 0);
+        }
+    }
+
+    private function CleanupLegacyVariables()
+    {
+        $idents = array('Online', 'LastError', 'ScanRunning', 'ScanProgress', 'ScanInfo', 'ScanLastRun');
+        foreach ($idents as $ident) {
+            $vid = @$this->GetIDForIdent($ident);
+            if ($vid > 0 && IPS_ObjectExists($vid)) {
+                @IPS_DeleteObject($vid);
+            }
         }
     }
 
@@ -192,9 +189,9 @@ class MadrixController extends IPSModule
 
         $this->SetBuffer('SkipStorageFullState', '0');
         $this->SetBuffer('ScanState', json_encode($state));
-        $this->SetValue('ScanRunning', true);
-        $this->SetValue('ScanProgress', 0);
-        $this->SetValue('ScanInfo', 'Scanning storages...');
+        $this->SetValueIfChanged('ScanRunning', true);
+        $this->SetValueIfChanged('ScanProgress', 0);
+        $this->SetValueIfChanged('ScanInfo', 'Scanning storages...');
         $this->SetTimerInterval('ScanTimer', 200);
     }
 
@@ -233,7 +230,7 @@ class MadrixController extends IPSModule
                 $state['done'] = 256;
                 $state['total'] = 256 + (count($occ) * 256);
 
-                $this->SetValue('ScanInfo', 'GetStorageFullState nicht verfuegbar, nutze Deck-Storages: ' . count($occ));
+                $this->SetValueIfChanged('ScanInfo', 'GetStorageFullState nicht verfuegbar, nutze Deck-Storages: ' . count($occ));
                 $this->SetBuffer('ScanState', json_encode($state));
                 $this->Unlock();
                 return;
@@ -251,7 +248,7 @@ class MadrixController extends IPSModule
                     $state['done'] = 0;
                     $state['total'] = 256 + (count($occ) * 256);
 
-                    $this->SetValue('ScanInfo', 'Scanning places in occupied storages: ' . count($occ));
+                    $this->SetValueIfChanged('ScanInfo', 'Scanning places in occupied storages: ' . count($occ));
                     break;
                 }
 
@@ -339,10 +336,10 @@ class MadrixController extends IPSModule
     private function StopScan($msg)
     {
         $this->SetTimerInterval('ScanTimer', 0);
-        $this->SetValue('ScanRunning', false);
-        $this->SetValue('ScanInfo', (string)$msg);
-        $this->SetValue('ScanProgress', 100);
-        $this->SetValue('ScanLastRun', date('Y-m-d H:i:s'));
+        $this->SetValueIfChanged('ScanRunning', false);
+        $this->SetValueIfChanged('ScanInfo', (string)$msg);
+        $this->SetValueIfChanged('ScanProgress', 100);
+        $this->SetValueIfChanged('ScanLastRun', date('Y-m-d H:i:s'));
         $this->SetBuffer('ScanState', json_encode(array()));
 
         $a = (int)$this->ReadAttributeInteger('DeckAInstance');
@@ -374,7 +371,7 @@ class MadrixController extends IPSModule
         if ($pct < 0) $pct = 0;
         if ($pct > 99 && isset($state['phase']) && $state['phase'] != 'done') $pct = 99;
 
-        $this->SetValue('ScanProgress', $pct);
+        $this->SetValueIfChanged('ScanProgress', $pct);
     }
 
     public function ForwardData($JSONString)
@@ -1117,13 +1114,7 @@ class MadrixController extends IPSModule
         $this->SetValueIfChanged('Online', (bool)$online);
 
         $e = (string)$err;
-        $vid = $this->GetIDForIdent('LastError');
-        if ($vid > 0) {
-            $cur = GetValue($vid);
-            if ($cur !== $e) {
-                $this->SetValue('LastError', $e);
-            }
-        }
+        $this->SetValueIfChanged('LastError', $e);
 
         $lastLogged = (string)$this->GetBuffer('LastLoggedError');
         if ($e !== $lastLogged) {
