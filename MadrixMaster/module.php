@@ -318,7 +318,7 @@ class MadrixMaster extends IPSModule
                 if ($svid > 0) {
                     @IPS_SetParent($svid, $cat);
                     IPS_SetVariableCustomProfile($svid, 'MADRIX.Switch');
-                    $this->EnableAction($switchIdent);
+                    @IPS_SetVariableCustomAction($svid, $this->InstanceID);
                     $switchMap[(string)$gid] = $svid;
                 }
             } else {
@@ -327,7 +327,7 @@ class MadrixMaster extends IPSModule
                     if ((int)IPS_GetParent($svid) != (int)$cat) @IPS_SetParent($svid, $cat);
                     if (IPS_GetName($svid) != $switchName) @IPS_SetName($svid, $switchName);
                     IPS_SetVariableCustomProfile($svid, 'MADRIX.Switch');
-                    $this->EnableAction($switchIdent);
+                    @IPS_SetVariableCustomAction($svid, $this->InstanceID);
                 }
             }
 
@@ -337,7 +337,7 @@ class MadrixMaster extends IPSModule
                 if ($curIdent !== $ident) {
                     @IPS_SetIdent($vid, $ident);
                 }
-                $this->EnableAction($ident);
+                @IPS_SetVariableCustomAction($vid, $this->InstanceID);
                 @SetValueInteger($vid, $percent);
             }
 
@@ -394,7 +394,6 @@ class MadrixMaster extends IPSModule
                 if ($vid > 0) {
                     @IPS_SetParent($vid, $cat);
                     IPS_SetVariableCustomProfile($vid, 'MADRIX.HexColor');
-                    $this->EnableAction($ident);
                     $map[(string)$cid] = $vid;
                 }
             } else {
@@ -404,6 +403,10 @@ class MadrixMaster extends IPSModule
                     if (IPS_GetName($vid) != $name) @IPS_SetName($vid, $name);
                     IPS_SetVariableCustomProfile($vid, 'MADRIX.HexColor');
                 }
+            }
+
+            if ($vid > 0 && IPS_ObjectExists($vid)) {
+                @IPS_SetVariableCustomAction($vid, $this->InstanceID);
             }
 
             if ($this->GetIDForIdent($ident) > 0) $this->SetValue($ident, $hex);
@@ -498,11 +501,7 @@ class MadrixMaster extends IPSModule
 
             if ($ident === 'Master' || strpos($ident, $groupPrefix) === 0) {
                 IPS_SetVariableCustomProfile($vid, 'MADRIX.Percent');
-                if ($ident === 'Master') {
-                    $this->EnableAction('Master');
-                } else {
-                    $this->EnableAction($ident);
-                }
+                @IPS_SetVariableCustomAction($vid, $this->InstanceID);
                 $val = (int)@GetValueInteger($vid);
                 if ($val > 100) {
                     $this->SetValue($ident, $this->ByteToPercent($val));
@@ -523,7 +522,7 @@ class MadrixMaster extends IPSModule
 
             if (strpos($ident, $switchPrefix) === 0) {
                 IPS_SetVariableCustomProfile($vid, 'MADRIX.Switch');
-                $this->EnableAction($ident);
+                @IPS_SetVariableCustomAction($vid, $this->InstanceID);
             }
         }
     }
