@@ -920,24 +920,46 @@ class MadrixController extends IPSModule
         if ($current > $count) $current = $count;
 
         for ($i = 1; $i <= $count; $i++) {
+            $switched = true;
             if ($i != $current) {
                 $okSet = true;
                 $this->HttpSet($setLayerFn, (string)$i, $okSet);
+                $switched = $okSet && $this->WaitForLayer($deck, $i);
             }
 
-            $okName = true;
-            $name = trim((string)$this->HttpGet($getNameFn, null, $okName));
-            if ($okName) {
-                $names[(string)$i] = $name;
+            if ($switched) {
+                $okName = true;
+                $name = trim((string)$this->HttpGet($getNameFn, null, $okName));
+                if ($okName) {
+                    $names[(string)$i] = $name;
+                }
             }
         }
 
         if ($current > 0) {
             $okSet = true;
             $this->HttpSet($setLayerFn, (string)$current, $okSet);
+            if ($okSet) {
+                $this->WaitForLayer($deck, $current);
+            }
         }
 
         return $names;
+    }
+
+    private function WaitForLayer($deck, $target)
+    {
+        $getLayerFn = ($deck == 'A') ? 'GetLayerDeckA' : 'GetLayerDeckB';
+        $target = $this->ClampInt((int)$target, 1, 8);
+
+        for ($i = 0; $i < 5; $i++) {
+            $ok = true;
+            $cur = (int)$this->HttpGet($getLayerFn, null, $ok);
+            if ($ok && $cur === $target) return true;
+            usleep(50000);
+        }
+
+        return false;
     }
 
     private function PollAllGroups($forceNames)
