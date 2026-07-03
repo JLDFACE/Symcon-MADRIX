@@ -16,10 +16,13 @@ class MadrixMaster extends IPSModule
         $this->RegisterAttributeInteger('CatGroups', 0);
         $this->RegisterAttributeInteger('CatColors', 0);
 
-        $this->SetBuffer('GroupVarMap', json_encode(array()));  // gid => varId
-        $this->SetBuffer('GroupSwitchVarMap', json_encode(array()));  // gid => varId
+        // Variablen-Zuordnungen als Attribut (persistent): Buffer sind nach jedem
+        // Neustart leer, dann legte EnsureGroupVars die Gruppen-Variablen doppelt an.
+        $this->RegisterAttributeString('GroupVarMap', '{}');  // gid => varId
+        $this->RegisterAttributeString('GroupSwitchVarMap', '{}');  // gid => varId
+        $this->RegisterAttributeString('ColorVarMap', '{}');  // cid => varId
+
         $this->SetBuffer('GroupLastMap', json_encode(array()));  // gid => last percent (>0)
-        $this->SetBuffer('ColorVarMap', json_encode(array()));  // cid => varId
 
         $this->EnsureProfiles();
         $this->EnsureCategories();
@@ -285,9 +288,11 @@ class MadrixMaster extends IPSModule
             $this->WriteAttributeInteger('CatGroups', $cat);
         }
 
-        $map = $this->GetJsonBuffer('GroupVarMap');
-        $switchMap = $this->GetJsonBuffer('GroupSwitchVarMap');
+        $map = $this->GetJsonAttr('GroupVarMap');
+        $switchMap = $this->GetJsonAttr('GroupSwitchVarMap');
         $lastMap = $this->GetJsonBuffer('GroupLastMap');
+        $mapBefore = json_encode($map);
+        $switchMapBefore = json_encode($switchMap);
 
         foreach ($groups as $g) {
             if (!is_array($g)) continue;
@@ -303,48 +308,38 @@ class MadrixMaster extends IPSModule
             $switchIdent = 'GroupSwitch_' . $gid;
             $switchName = $name . ' Schalter';
 
-            $vid = 0;
-            if (!isset($map[(string)$gid]) || !IPS_ObjectExists((int)$map[(string)$gid])) {
+            // Bestehende Variable wiederfinden (Map, Kategorie, Instanz), erst dann neu anlegen.
+            // RegisterVariable sieht nur direkte Instanz-Kinder – in die Kategorie verschobene
+            // Variablen würden sonst nach jedem Neustart doppelt angelegt.
+            $vid = $this->ResolveVarByMapOrIdent($map, (string)$gid, $cat, $ident);
+            if ($vid == 0) {
                 $this->RegisterVariableInteger($ident, $name, 'MADRIX.Percent', 1000 + $gid);
                 if (method_exists($this, 'EnableAction')) {
                     $this->EnableAction($ident);
                 }
                 $vid = $this->GetIDForIdent($ident);
-                if ($vid > 0) {
-                    @IPS_SetParent($vid, $cat);
-                    IPS_SetVariableCustomProfile($vid, 'MADRIX.Percent');
-                    $map[(string)$gid] = $vid;
-                }
-            } else {
-                $vid = (int)$map[(string)$gid];
-                if ($vid > 0 && IPS_ObjectExists($vid)) {
-                    if ((int)IPS_GetParent($vid) != (int)$cat) @IPS_SetParent($vid, $cat);
-                    if (IPS_GetName($vid) != $name) @IPS_SetName($vid, $name);
-                    IPS_SetVariableCustomProfile($vid, 'MADRIX.Percent');
-                }
+            }
+            if ($vid > 0 && IPS_ObjectExists($vid)) {
+                $map[(string)$gid] = $vid;
+                if ((int)IPS_GetParent($vid) != (int)$cat) @IPS_SetParent($vid, $cat);
+                if (IPS_GetName($vid) != $name) @IPS_SetName($vid, $name);
+                IPS_SetVariableCustomProfile($vid, 'MADRIX.Percent');
             }
 
-            $svid = 0;
-            if (!isset($switchMap[(string)$gid]) || !IPS_ObjectExists((int)$switchMap[(string)$gid])) {
+            $svid = $this->ResolveVarByMapOrIdent($switchMap, (string)$gid, $cat, $switchIdent);
+            if ($svid == 0) {
                 $this->RegisterVariableBoolean($switchIdent, $switchName, 'MADRIX.Switch', 1100 + $gid);
                 if (method_exists($this, 'EnableAction')) {
                     $this->EnableAction($switchIdent);
                 }
                 $svid = $this->GetIDForIdent($switchIdent);
-                if ($svid > 0) {
-                    @IPS_SetParent($svid, $cat);
-                    IPS_SetVariableCustomProfile($svid, 'MADRIX.Switch');
-                    @IPS_SetVariableCustomAction($svid, $this->InstanceID);
-                    $switchMap[(string)$gid] = $svid;
-                }
-            } else {
-                $svid = (int)$switchMap[(string)$gid];
-                if ($svid > 0 && IPS_ObjectExists($svid)) {
-                    if ((int)IPS_GetParent($svid) != (int)$cat) @IPS_SetParent($svid, $cat);
-                    if (IPS_GetName($svid) != $switchName) @IPS_SetName($svid, $switchName);
-                    IPS_SetVariableCustomProfile($svid, 'MADRIX.Switch');
-                    @IPS_SetVariableCustomAction($svid, $this->InstanceID);
-                }
+            }
+            if ($svid > 0 && IPS_ObjectExists($svid)) {
+                $switchMap[(string)$gid] = $svid;
+                if ((int)IPS_GetParent($svid) != (int)$cat) @IPS_SetParent($svid, $cat);
+                if (IPS_GetName($svid) != $switchName) @IPS_SetName($svid, $switchName);
+                IPS_SetVariableCustomProfile($svid, 'MADRIX.Switch');
+                @IPS_SetVariableCustomAction($svid, $this->InstanceID);
             }
 
             if ($vid > 0 && IPS_ObjectExists($vid)) {
@@ -371,8 +366,8 @@ class MadrixMaster extends IPSModule
             }
         }
 
-        $this->SetBuffer('GroupVarMap', json_encode($map));
-        $this->SetBuffer('GroupSwitchVarMap', json_encode($switchMap));
+        if (json_encode($map) !== $mapBefore) $this->SetJsonAttr('GroupVarMap', $map);
+        if (json_encode($switchMap) !== $switchMapBefore) $this->SetJsonAttr('GroupSwitchVarMap', $switchMap);
         $this->SetBuffer('GroupLastMap', json_encode($lastMap));
     }
 
@@ -390,7 +385,8 @@ class MadrixMaster extends IPSModule
             $this->WriteAttributeInteger('CatColors', $cat);
         }
 
-        $map = $this->GetJsonBuffer('ColorVarMap');
+        $map = $this->GetJsonAttr('ColorVarMap');
+        $mapBefore = json_encode($map);
 
         foreach ($colors as $c) {
             if (!is_array($c)) continue;
@@ -404,24 +400,19 @@ class MadrixMaster extends IPSModule
             $ident = 'Color_' . $cid;
             $name = 'Global Color ' . $cid;
 
-            if (!isset($map[(string)$cid]) || !IPS_ObjectExists((int)$map[(string)$cid])) {
+            $vid = $this->ResolveVarByMapOrIdent($map, (string)$cid, $cat, $ident);
+            if ($vid == 0) {
                 $this->RegisterVariableInteger($ident, $name, 'MADRIX.HexColor', 2000 + $cid);
                 if (method_exists($this, 'EnableAction')) {
                     $this->EnableAction($ident);
                 }
                 $vid = $this->GetIDForIdent($ident);
-                if ($vid > 0) {
-                    @IPS_SetParent($vid, $cat);
-                    IPS_SetVariableCustomProfile($vid, 'MADRIX.HexColor');
-                    $map[(string)$cid] = $vid;
-                }
-            } else {
-                $vid = (int)$map[(string)$cid];
-                if ($vid > 0 && IPS_ObjectExists($vid)) {
-                    if ((int)IPS_GetParent($vid) != (int)$cat) @IPS_SetParent($vid, $cat);
-                    if (IPS_GetName($vid) != $name) @IPS_SetName($vid, $name);
-                    IPS_SetVariableCustomProfile($vid, 'MADRIX.HexColor');
-                }
+            }
+            if ($vid > 0 && IPS_ObjectExists($vid)) {
+                $map[(string)$cid] = $vid;
+                if ((int)IPS_GetParent($vid) != (int)$cat) @IPS_SetParent($vid, $cat);
+                if (IPS_GetName($vid) != $name) @IPS_SetName($vid, $name);
+                IPS_SetVariableCustomProfile($vid, 'MADRIX.HexColor');
             }
 
             if ($vid > 0 && IPS_ObjectExists($vid)) {
@@ -431,7 +422,7 @@ class MadrixMaster extends IPSModule
             if ($this->GetIDForIdent($ident) > 0) $this->SetValue($ident, $hex);
         }
 
-        $this->SetBuffer('ColorVarMap', json_encode($map));
+        if (json_encode($map) !== $mapBefore) $this->SetJsonAttr('ColorVarMap', $map);
     }
 
     private function SendToParent($cmd, $arg)
@@ -446,6 +437,31 @@ class MadrixMaster extends IPSModule
         $arr = json_decode($raw, true);
         if (!is_array($arr)) $arr = array();
         return $arr;
+    }
+
+    private function GetJsonAttr($name)
+    {
+        $arr = json_decode($this->ReadAttributeString($name), true);
+        if (!is_array($arr)) $arr = array();
+        return $arr;
+    }
+
+    private function SetJsonAttr($name, $arr)
+    {
+        $this->WriteAttributeString($name, json_encode($arr));
+    }
+
+    // Variable robust wiederfinden: erst über die gespeicherte Map, dann per Ident
+    // in der Ziel-Kategorie, zuletzt per Ident unter der Instanz (noch nicht verschoben).
+    private function ResolveVarByMapOrIdent($map, $key, $cat, $ident)
+    {
+        if (isset($map[$key])) {
+            $vid = (int)$map[$key];
+            if ($vid > 0 && IPS_ObjectExists($vid)) return $vid;
+        }
+        $vid = $this->FindChildVariableByIdent($cat, $ident);
+        if ($vid > 0) return $vid;
+        return $this->FindChildVariableByIdent($this->InstanceID, $ident);
     }
 
     private function GetCategoryByIdentOrName($parentId, $ident, $name)
@@ -579,7 +595,7 @@ class MadrixMaster extends IPSModule
 
     private function GetGroupVarId($gid)
     {
-        $map = $this->GetJsonBuffer('GroupVarMap');
+        $map = $this->GetJsonAttr('GroupVarMap');
         $key = (string)$gid;
         if (isset($map[$key]) && IPS_ObjectExists((int)$map[$key])) {
             return (int)$map[$key];
@@ -587,16 +603,17 @@ class MadrixMaster extends IPSModule
 
         $cat = (int)$this->ReadAttributeInteger('CatGroups');
         $vid = $this->FindChildVariableByIdent($cat, 'Group_' . $gid);
+        if ($vid == 0) $vid = $this->FindChildVariableByIdent($this->InstanceID, 'Group_' . $gid);
         if ($vid > 0) {
             $map[$key] = $vid;
-            $this->SetBuffer('GroupVarMap', json_encode($map));
+            $this->SetJsonAttr('GroupVarMap', $map);
         }
         return $vid;
     }
 
     private function GetGroupSwitchVarId($gid)
     {
-        $map = $this->GetJsonBuffer('GroupSwitchVarMap');
+        $map = $this->GetJsonAttr('GroupSwitchVarMap');
         $key = (string)$gid;
         if (isset($map[$key]) && IPS_ObjectExists((int)$map[$key])) {
             return (int)$map[$key];
@@ -604,9 +621,10 @@ class MadrixMaster extends IPSModule
 
         $cat = (int)$this->ReadAttributeInteger('CatGroups');
         $vid = $this->FindChildVariableByIdent($cat, 'GroupSwitch_' . $gid);
+        if ($vid == 0) $vid = $this->FindChildVariableByIdent($this->InstanceID, 'GroupSwitch_' . $gid);
         if ($vid > 0) {
             $map[$key] = $vid;
-            $this->SetBuffer('GroupSwitchVarMap', json_encode($map));
+            $this->SetJsonAttr('GroupSwitchVarMap', $map);
         }
         return $vid;
     }
