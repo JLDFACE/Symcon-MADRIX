@@ -10,10 +10,12 @@ class MadrixDeck extends IPSModule
 
         $this->RegisterPropertyString('Deck', 'A');
         $this->RegisterPropertyInteger('Storage', 1);
-        $this->RegisterPropertyInteger('LayerCount', 8);
+        $this->RegisterPropertyInteger('LayerCount', 0); // 0 = Auto (Anzahl vom aktiven Place)
 
         $this->SetBuffer('Pending', json_encode(array()));
         $this->SetBuffer('DescCache', json_encode(array())); // place(string) => desc
+        $this->SetBuffer('AutoLayerCount', '0'); // letzte vom Controller gemeldete Layer-Anzahl
+        $this->SetBuffer('LayerLastMap', json_encode(array())); // layer(string) => letzter Prozentwert > 0
 
         $this->EnsureProfiles();
 
@@ -29,7 +31,10 @@ class MadrixDeck extends IPSModule
         parent::ApplyChanges();
 
         $this->EnsureProfiles();
-        $this->EnsureLayerVars();
+        // Löschen überzähliger Variablen nur bei fester Anzahl (Property > 0).
+        // Im Auto-Modus würde ein Place mit weniger Layern sonst Variablen löschen
+        // und damit BWM-/Ereignis-Verknüpfungen zerstören.
+        $this->EnsureLayerVars((int)$this->ReadPropertyInteger('LayerCount') > 0);
 
         $deck = $this->GetDeck();
 
@@ -89,23 +94,65 @@ class MadrixDeck extends IPSModule
             return;
         }
 
+        if (substr($Ident, 0, 12) == 'LayerSwitch_') {
+            $layer = (int)substr($Ident, 12);
+            if ($layer <= 0) return;
+
+            $on = ((bool)$Value) ? true : false;
+
+            $target = 0;
+            if ($on) {
+                $current = $this->GetLayerPercent($layer);
+                if ($current > 0) {
+                    $target = $current;
+                } else {
+                    $last = $this->GetLayerLastPercent($layer);
+                    $target = ($last > 0) ? $last : 100;
+                }
+            }
+
+            $this->ApplyLayerTarget($layer, $target);
+            return;
+        }
+
         if (substr($Ident, 0, 6) == 'Layer_') {
             $layer = (int)substr($Ident, 6);
             if ($layer <= 0) return;
 
-            $on = ((bool)$Value) ? true : false;
-            $this->SetValue($Ident, $on);
-            $this->SetPending($Ident, $on ? 1 : 0, 10);
+            $p = (int)$Value;
+            if ($p < 0) $p = 0;
+            if ($p > 100) $p = 100;
 
-            $val = $this->PercentToByte($on ? 100 : 0);
-            $deck = $this->GetDeck();
-            $this->SendToParent('SetLayerOpacity', array(
-                'deck' => $deck,
-                'layer' => $layer,
-                'value' => $val
-            ));
+            $this->ApplyLayerTarget($layer, $p);
             return;
         }
+    }
+
+    private function ApplyLayerTarget($layer, $percent)
+    {
+        $ident = 'Layer_' . (int)$layer;
+
+        $vid = $this->GetLayerVarId($layer);
+        if ($vid > 0) {
+            @SetValueInteger($vid, (int)$percent);
+        }
+
+        $svid = $this->GetLayerSwitchVarId($layer);
+        if ($svid > 0) {
+            @SetValueBoolean($svid, ((int)$percent > 0));
+        }
+
+        if ((int)$percent > 0) {
+            $this->UpdateLayerLastPercent($layer, (int)$percent);
+        }
+
+        $this->SetPending($ident, (int)$percent, 10);
+
+        $this->SendToParent('SetLayerOpacity', array(
+            'deck' => $this->GetDeck(),
+            'layer' => (int)$layer,
+            'value' => $this->PercentToByte((int)$percent)
+        ));
     }
 
     public function ReceiveData($JSONString)
@@ -160,6 +207,16 @@ class MadrixDeck extends IPSModule
             $layers = isset($d['layers']) && is_array($d['layers']) ? $d['layers'] : null;
             $layerNames = isset($d['layerNames']) && is_array($d['layerNames']) ? $d['layerNames'] : null;
 
+            if (isset($d['layerCount']) && (int)$this->ReadPropertyInteger('LayerCount') <= 0) {
+                $lc = (int)$d['layerCount'];
+                if ($lc < 0) $lc = 0;
+                if ($lc > 16) $lc = 16;
+                if ($lc != (int)$this->GetBuffer('AutoLayerCount')) {
+                    $this->SetBuffer('AutoLayerCount', (string)$lc);
+                    if ($lc > 0) $this->EnsureLayerVars(false);
+                }
+            }
+
             if ($place !== null) $this->ApplyPolledWithPending('Place', $place, 0);
             if ($speed !== null) $this->ApplyPolledWithPending('Speed', $speed, 0.05);
 
@@ -173,8 +230,24 @@ class MadrixDeck extends IPSModule
                     $layer = isset($entry['layer']) ? (int)$entry['layer'] : 0;
                     if ($layer <= 0) continue;
                     $opacity = isset($entry['opacity']) ? (int)$entry['opacity'] : 0;
-                    $on = ($opacity > 0) ? 1 : 0;
-                    $this->ApplyPolledWithPending('Layer_' . $layer, $on, 0);
+                    $percent = $this->ByteToPercent($opacity);
+
+                    $this->ApplyPolledWithPending('Layer_' . $layer, $percent, 0);
+
+                    // Schalter folgt dem (ggf. durch Pending geschuetzten) Variablenwert
+                    $vid = $this->GetLayerVarId($layer);
+                    $eff = ($vid > 0) ? (int)@GetValueInteger($vid) : $percent;
+                    $svid = $this->GetLayerSwitchVarId($layer);
+                    if ($svid > 0) {
+                        $on = ($eff > 0);
+                        if ((bool)@GetValueBoolean($svid) !== $on) {
+                            @SetValueBoolean($svid, $on);
+                        }
+                    }
+
+                    if ($percent > 0) {
+                        $this->UpdateLayerLastPercent($layer, $percent);
+                    }
                 }
             }
 
@@ -192,6 +265,16 @@ class MadrixDeck extends IPSModule
             IPS_SetVariableProfileValues($pp, 1, 256, 1);
         }
 
+        if (!IPS_VariableProfileExists('MADRIX.Percent')) {
+            IPS_CreateVariableProfile('MADRIX.Percent', 1);
+        }
+        IPS_SetVariableProfileValues('MADRIX.Percent', 0, 100, 1);
+        if (function_exists('IPS_SetVariableProfileSuffix')) {
+            IPS_SetVariableProfileSuffix('MADRIX.Percent', ' %');
+        } else {
+            IPS_SetVariableProfileText('MADRIX.Percent', '', ' %');
+        }
+
         if (!IPS_VariableProfileExists('MADRIX.Speed')) {
             IPS_CreateVariableProfile('MADRIX.Speed', 2);
             IPS_SetVariableProfileValues('MADRIX.Speed', -10, 10, 0.1);
@@ -205,12 +288,13 @@ class MadrixDeck extends IPSModule
         }
     }
 
-    private function EnsureLayerVars()
+    private function EnsureLayerVars($allowDelete)
     {
         $count = $this->GetLayerCount();
         $deck = $this->GetDeck();
 
-        $existing = array(); // layer => varId
+        $existing = array();       // layer => varId (Prozent-Dimmer)
+        $existingSwitch = array(); // layer => varId (Schalter)
         $children = @IPS_GetChildrenIDs($this->InstanceID);
         if (is_array($children)) {
             foreach ($children as $id) {
@@ -218,30 +302,62 @@ class MadrixDeck extends IPSModule
                 if (!is_array($obj)) continue;
                 if ((int)$obj['ObjectType'] !== 2) continue;
                 $ident = (string)$obj['ObjectIdent'];
-                if (strpos($ident, 'Layer_') !== 0) continue;
-                $layer = (int)substr($ident, 6);
-                if ($layer > 0) $existing[$layer] = (int)$id;
+                if (strpos($ident, 'LayerSwitch_') === 0) {
+                    $layer = (int)substr($ident, 12);
+                    if ($layer > 0) $existingSwitch[$layer] = (int)$id;
+                } elseif (strpos($ident, 'Layer_') === 0) {
+                    $layer = (int)substr($ident, 6);
+                    if ($layer > 0) $existing[$layer] = (int)$id;
+                }
             }
         }
 
         for ($i = 1; $i <= $count; $i++) {
             $ident = 'Layer_' . $i;
             $name = 'Deck ' . $deck . ' Layer ' . $i;
+            $switchIdent = 'LayerSwitch_' . $i;
+            $switchName = $name . ' Schalter';
+
+            // Migration: fruehere Bool-Variable durch Prozent-Dimmer ersetzen
+            if (isset($existing[$i]) && IPS_ObjectExists((int)$existing[$i])) {
+                $var = @IPS_GetVariable((int)$existing[$i]);
+                if (is_array($var) && (int)$var['VariableType'] !== 1) {
+                    @IPS_DeleteObject((int)$existing[$i]);
+                    unset($existing[$i]);
+                }
+            }
 
             if (isset($existing[$i]) && IPS_ObjectExists((int)$existing[$i])) {
                 $vid = (int)$existing[$i];
                 if (IPS_GetName($vid) != $name) IPS_SetName($vid, $name);
-                IPS_SetVariableCustomProfile($vid, 'MADRIX.Switch');
+                IPS_SetVariableCustomProfile($vid, 'MADRIX.Percent');
                 $this->EnableAction($ident);
             } else {
-                $this->RegisterVariableBoolean($ident, $name, 'MADRIX.Switch', 30 + $i);
+                $this->RegisterVariableInteger($ident, $name, 'MADRIX.Percent', 30 + $i);
                 $this->EnableAction($ident);
+            }
+
+            if (isset($existingSwitch[$i]) && IPS_ObjectExists((int)$existingSwitch[$i])) {
+                $svid = (int)$existingSwitch[$i];
+                if (IPS_GetName($svid) != $switchName) IPS_SetName($svid, $switchName);
+                IPS_SetVariableCustomProfile($svid, 'MADRIX.Switch');
+                $this->EnableAction($switchIdent);
+            } else {
+                $this->RegisterVariableBoolean($switchIdent, $switchName, 'MADRIX.Switch', 60 + $i);
+                $this->EnableAction($switchIdent);
             }
         }
 
-        foreach ($existing as $layer => $vid) {
-            if ($layer > $count && IPS_ObjectExists($vid)) {
-                @IPS_DeleteObject($vid);
+        if ($allowDelete) {
+            foreach ($existing as $layer => $vid) {
+                if ($layer > $count && IPS_ObjectExists($vid)) {
+                    @IPS_DeleteObject($vid);
+                }
+            }
+            foreach ($existingSwitch as $layer => $vid) {
+                if ($layer > $count && IPS_ObjectExists($vid)) {
+                    @IPS_DeleteObject($vid);
+                }
             }
         }
     }
@@ -249,9 +365,14 @@ class MadrixDeck extends IPSModule
     private function GetLayerCount()
     {
         $c = (int)$this->ReadPropertyInteger('LayerCount');
-        if ($c < 0) $c = 0;
-        if ($c > 8) $c = 8;
-        return $c;
+        if ($c > 16) $c = 16;
+        if ($c > 0) return $c;
+
+        // 0 = Auto: letzte vom Controller gemeldete Anzahl des aktiven Place
+        $auto = (int)$this->GetBuffer('AutoLayerCount');
+        if ($auto < 0) $auto = 0;
+        if ($auto > 16) $auto = 16;
+        return $auto;
     }
 
     private function UpdateLayerNames($layerNames)
@@ -272,6 +393,14 @@ class MadrixDeck extends IPSModule
                     IPS_SetName($vid, $display);
                 }
             }
+
+            $svid = $this->GetLayerSwitchVarId($i);
+            if ($svid > 0 && IPS_ObjectExists($svid)) {
+                $switchDisplay = $display . ' Schalter';
+                if (IPS_GetName($svid) != $switchDisplay) {
+                    IPS_SetName($svid, $switchDisplay);
+                }
+            }
         }
     }
 
@@ -286,8 +415,17 @@ class MadrixDeck extends IPSModule
 
     private function GetLayerVarId($layer)
     {
-        $ident = 'Layer_' . (int)$layer;
-        $vid = $this->GetIDForIdent($ident);
+        return $this->FindVarByIdent('Layer_' . (int)$layer);
+    }
+
+    private function GetLayerSwitchVarId($layer)
+    {
+        return $this->FindVarByIdent('LayerSwitch_' . (int)$layer);
+    }
+
+    private function FindVarByIdent($ident)
+    {
+        $vid = @$this->GetIDForIdent($ident);
         if ($vid > 0 && IPS_ObjectExists($vid)) return $vid;
 
         $children = @IPS_GetChildrenIDs($this->InstanceID);
@@ -301,6 +439,41 @@ class MadrixDeck extends IPSModule
         }
 
         return 0;
+    }
+
+    private function GetLayerPercent($layer)
+    {
+        $vid = $this->GetLayerVarId($layer);
+        if ($vid <= 0) return 0;
+        return (int)@GetValueInteger($vid);
+    }
+
+    private function GetLayerLastPercent($layer)
+    {
+        $raw = $this->GetBuffer('LayerLastMap');
+        $map = json_decode($raw, true);
+        if (!is_array($map)) $map = array();
+        $key = (string)(int)$layer;
+        return isset($map[$key]) ? (int)$map[$key] : 0;
+    }
+
+    private function UpdateLayerLastPercent($layer, $percent)
+    {
+        $p = (int)$percent;
+        if ($p <= 0) return;
+        $raw = $this->GetBuffer('LayerLastMap');
+        $map = json_decode($raw, true);
+        if (!is_array($map)) $map = array();
+        $map[(string)(int)$layer] = $p;
+        $this->SetBuffer('LayerLastMap', json_encode($map));
+    }
+
+    private function ByteToPercent($b)
+    {
+        $x = (int)$b;
+        if ($x < 0) $x = 0;
+        if ($x > 255) $x = 255;
+        return (int)round(($x * 100) / 255);
     }
 
     private function GetPlaceProfile()

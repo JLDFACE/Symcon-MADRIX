@@ -171,6 +171,50 @@ class MadrixController extends IPSModule
         $this->Poll();
     }
 
+    // ===== Cue List (Remote HTTP) =====
+    // Cue Lists arbeiten in MADRIX immer auf ganzen Storage Places (kein Layer-Bezug).
+    // Aufrufbar aus Skripten/Ereignissen: MADRIX_CuelistGoTo(<ControllerID>, <CueNr>) usw.
+
+    public function CuelistSelect(int $Index)
+    {
+        $ok = true;
+        $this->HttpSet('SetCuelistSelect', (string)max(0, $Index), $ok);
+        return $ok;
+    }
+
+    public function CuelistPlayStart()
+    {
+        $ok = true;
+        $this->HttpSet('SetCuelistPlayStart', null, $ok);
+        if ($ok) $this->AfterChange();
+        return $ok;
+    }
+
+    public function CuelistPlayStop()
+    {
+        $ok = true;
+        $this->HttpSet('SetCuelistPlayStop', null, $ok);
+        if ($ok) $this->AfterChange();
+        return $ok;
+    }
+
+    public function CuelistGo()
+    {
+        $ok = true;
+        $this->HttpSet('SetCuelistGo', null, $ok);
+        if ($ok) $this->AfterChange();
+        return $ok;
+    }
+
+    public function CuelistGoTo(int $Cue)
+    {
+        if ($Cue < 1) return false;
+        $ok = true;
+        $this->HttpSet('SetCuelistGoTo', (string)$Cue, $ok);
+        if ($ok) $this->AfterChange();
+        return $ok;
+    }
+
     // ===== Place Scan (belegte Places) =====
 
     public function StartPlaceScan()
@@ -540,7 +584,7 @@ class MadrixController extends IPSModule
                     $layer = isset($arg['layer']) ? (int)$arg['layer'] : 1;
                     $val = isset($arg['value']) ? (int)$arg['value'] : 0;
 
-                    $layer = $this->ClampInt($layer, 1, 8);
+                    $layer = $this->ClampInt($layer, 1, 16);
                     $val = $this->ClampInt($val, 0, 255);
 
                     $fn = '';
@@ -848,8 +892,15 @@ class MadrixController extends IPSModule
         if ($deckInstance > 0 && IPS_ObjectExists($deckInstance)) {
             $layerCount = (int)@IPS_GetProperty($deckInstance, 'LayerCount');
         }
+        if ($layerCount <= 0) {
+            // 0 = Auto: Layer-Anzahl des aktiven Place direkt von MADRIX abfragen
+            $okCount = true;
+            $countFn = ($deck == 'A') ? 'GetLayerCountDeckA' : 'GetLayerCountDeckB';
+            $auto = (int)$this->HttpGetSilent($countFn, null, $okCount);
+            $layerCount = $okCount ? $auto : 0;
+        }
         if ($layerCount < 0) $layerCount = 0;
-        if ($layerCount > 8) $layerCount = 8;
+        if ($layerCount > 16) $layerCount = 16;
         if ($layerCount > 0) {
             if ($forceDesc) {
                 $layerNames = $this->SyncLayerNames($deck, $layerCount, array());
@@ -901,6 +952,7 @@ class MadrixController extends IPSModule
             'speed' => $speed,
             'storage' => $storage,
             'desc' => $desc,
+            'layerCount' => $layerCount,
             'layers' => $layers,
             'layerNames' => $layerNames
         );
@@ -973,7 +1025,7 @@ class MadrixController extends IPSModule
     private function WaitForLayer($deck, $target)
     {
         $getLayerFn = ($deck == 'A') ? 'GetLayerDeckA' : 'GetLayerDeckB';
-        $target = $this->ClampInt((int)$target, 1, 8);
+        $target = $this->ClampInt((int)$target, 1, 16);
 
         for ($i = 0; $i < 15; $i++) {
             $ok = true;

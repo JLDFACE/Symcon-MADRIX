@@ -25,9 +25,9 @@
     {
       "type": "NumberSpinner",
       "name": "LayerCount",
-      "caption": "Ebenen (0..8)",
+      "caption": "Ebenen (0 = automatisch vom aktiven Place, max. 16)",
       "minimum": 0,
-      "maximum": 8
+      "maximum": 16
     }
   ],
   "actions": [
