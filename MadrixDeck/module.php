@@ -148,10 +148,15 @@ class MadrixDeck extends IPSModule
 
         $this->SetPending($ident, (int)$percent, 10);
 
+        // "Aus" (0%) wird als Sentinel 254 gesendet (optisch = voll hell), damit die
+        // Opacity beim Ausschalten nie sichtbar auf 0 faellt. Das Layer-Makro erkennt
+        // 254 als "rausfahren" und setzt die Opacity erst am Ende (dunkel) selbst auf 0.
+        $byte = ((int)$percent <= 0) ? 254 : $this->PercentToByte((int)$percent);
+
         $this->SendToParent('SetLayerOpacity', array(
             'deck' => $this->GetDeck(),
             'layer' => (int)$layer,
-            'value' => $this->PercentToByte((int)$percent)
+            'value' => $byte
         ));
     }
 
