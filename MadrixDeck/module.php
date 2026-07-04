@@ -322,7 +322,7 @@ class MadrixDeck extends IPSModule
             if (isset($existing[$i]) && IPS_ObjectExists((int)$existing[$i])) {
                 $var = @IPS_GetVariable((int)$existing[$i]);
                 if (is_array($var) && (int)$var['VariableType'] !== 1) {
-                    @IPS_DeleteObject((int)$existing[$i]);
+                    @IPS_DeleteVariable((int)$existing[$i]);
                     unset($existing[$i]);
                 }
             }
@@ -351,12 +351,12 @@ class MadrixDeck extends IPSModule
         if ($allowDelete) {
             foreach ($existing as $layer => $vid) {
                 if ($layer > $count && IPS_ObjectExists($vid)) {
-                    @IPS_DeleteObject($vid);
+                    @IPS_DeleteVariable($vid);
                 }
             }
             foreach ($existingSwitch as $layer => $vid) {
                 if ($layer > $count && IPS_ObjectExists($vid)) {
-                    @IPS_DeleteObject($vid);
+                    @IPS_DeleteVariable($vid);
                 }
             }
         }

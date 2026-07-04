@@ -108,7 +108,7 @@ class MadrixController extends IPSModule
         foreach ($idents as $ident) {
             $vid = @$this->GetIDForIdent($ident);
             if ($vid > 0 && IPS_ObjectExists($vid)) {
-                @IPS_DeleteObject($vid);
+                @IPS_DeleteVariable($vid);
             }
         }
     }
@@ -1512,7 +1512,7 @@ class MadrixController extends IPSModule
                 }
             }
 
-            @IPS_DeleteObject($catId);
+            @IPS_DeleteCategory($catId);
         }
     }
 
