@@ -1,8 +1,8 @@
 {
-  "MadrixExe": "C:\\Program Files\\MADRIX 5\\madrix.exe",
+  "MadrixExe": "C:\\Program Files\\MADRIX5\\MADRIX.exe",
   "ProcessName": "madrix",
 
-  "UseHttpCheck": true,
+  "UseHttpCheck": false,
   "HttpHost": "127.0.0.1",
   "HttpPort": 80,
   "HttpUser": "",

@@ -110,6 +110,14 @@ function Write-Log {
     Write-Output $line
 }
 
+function Find-MadrixExe {
+    foreach ($r in @($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ }) {
+        $hit = Get-ChildItem -Path $r -Recurse -Filter "MADRIX.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($hit) { return $hit.FullName }
+    }
+    return $null
+}
+
 function Get-MadrixProcess {
     return Get-Process -Name $ProcessName -ErrorAction SilentlyContinue | Select-Object -First 1
 }
@@ -193,9 +201,16 @@ if ($ConfigLoaded) {
 } else {
     Write-Log "Keine Konfigdatei gefunden ($ConfigPath) - nutze Defaults." "WARN"
 }
-# Fruehwarnung, wenn die EXE nicht existiert (haeufigste Fehlkonfiguration)
+# Wenn die konfigurierte EXE nicht existiert: einmalig automatisch suchen
 if (-not (Test-Path $MadrixExe)) {
-    Write-Log "ACHTUNG: konfigurierte MadrixExe existiert nicht: $MadrixExe" "ERROR"
+    Write-Log "Konfigurierte MadrixExe existiert nicht: $MadrixExe - suche automatisch ..." "WARN"
+    $auto = Find-MadrixExe
+    if ($auto) {
+        $MadrixExe = $auto
+        Write-Log "MADRIX.exe automatisch gefunden und verwendet: $MadrixExe"
+    } else {
+        Write-Log "ACHTUNG: keine MADRIX.exe gefunden - bitte MadrixExe in der Konfig setzen." "ERROR"
+    }
 }
 Write-Log "MADRIX Watchdog gestartet. EXE='$MadrixExe', Intervall=${CheckIntervalSec}s, FailThreshold=$FailThreshold, HttpCheck=$UseHttpCheck."
 

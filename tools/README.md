@@ -21,17 +21,22 @@ gestartet. Genau das erledigt der Installer.
 ## Schnellstart (empfohlen)
 
 1. Diesen `tools`-Ordner auf den Madrix-PC kopieren (OneDrive/USB/GitHub).
-2. **`Install.cmd` doppelklicken.** Der Installer holt sich Adminrechte, kopiert alles
-   nach `C:\MadrixWatchdog`, legt die Autostart-Aufgabe *„MADRIX Watchdog"* an und
-   öffnet die Konfigdatei.
-3. In der geöffneten **`madrix-watchdog.config.json`** anpassen und speichern:
-   - `MadrixExe` → Pfad zur `madrix.exe`
-   - `HttpPort` / `HttpUser` / `HttpPass` → passend zum MADRIX-HTTP-Remote
-     (oder `"UseHttpCheck": false`, wenn du HTTP nicht nutzt → Freeze wird dann nur
-     über die Fensterreaktion erkannt)
-4. Auf die Frage **„Watchdog jetzt starten?"** mit *J* antworten. Fertig.
+2. **`Install.cmd` doppelklicken.** Der Installer holt sich Adminrechte und führt dich
+   durch alles:
+   - **findet die `MADRIX.exe` automatisch** (du bestätigst nur mit Enter),
+   - fragt, ob der HTTP-Check genutzt werden soll (Standard: nein) und ggf. Port/Login,
+   - **schreibt die Konfig selbst** (BOM-frei – kein Notepad-Editieren nötig),
+   - legt die Autostart-Aufgabe *„MADRIX Watchdog"* an und startet sie auf Wunsch.
+3. Zum Testen MADRIX schließen → es startet binnen Sekunden neu. Fertig.
 
-Deinstallieren: **`Uninstall.cmd`** (entfernt nur die Aufgabe, Ordner bleibt).
+**Status prüfen:** **`Status.cmd`** doppelklicken → zeigt, ob Aufgabe/Watchdog/MADRIX
+laufen, die aktuelle Konfig (inkl. „EXE-Pfad gültig?") und die letzten Log-Zeilen.
+
+**Deinstallieren:** **`Uninstall.cmd`** (entfernt nur die Aufgabe, Ordner bleibt).
+
+Die Werte lassen sich jederzeit anpassen, indem du `Install.cmd` erneut ausführst
+(„Vorhandene Konfiguration behalten? N") oder `C:\MadrixWatchdog\madrix-watchdog.config.json`
+direkt editierst.
 
 ## Als echte .exe (optional)
 
@@ -103,10 +108,12 @@ zentral protokolliert und alarmiert.
 
 | Datei | Zweck |
 |-------|-------|
-| `Install.cmd` | Einrichtung per Doppelklick (elevated) |
-| `Install.ps1` | wird von Install.cmd aufgerufen (Kopieren + Aufgabe) |
+| `Install.cmd` | Einrichtung per Doppelklick (elevated, interaktiv) |
+| `Install.ps1` | wird von Install.cmd aufgerufen (Auto-Erkennung, Konfig, Aufgabe) |
+| `Status.cmd` | Zustandsübersicht per Doppelklick |
+| `Status.ps1` | wird von Status.cmd aufgerufen |
 | `Uninstall.cmd` | Autostart-Aufgabe entfernen |
 | `madrix-watchdog.ps1` | der Watchdog |
-| `madrix-watchdog.config.json` | **die einzige Datei, die du anpasst** |
+| `madrix-watchdog.config.json` | Konfig-Vorlage (der Installer schreibt sie für dich) |
 | `build-exe.ps1` | optional: EXE bauen (ps2exe) |
 | `madrix-watchdog-task.xml` | manuelle Aufgabenplanung-Importvorlage (Alternative zum Installer) |
