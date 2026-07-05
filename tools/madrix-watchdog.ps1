@@ -53,15 +53,20 @@ $cfg = [ordered]@{
 }
 
 $ConfigLoaded = $false
+$ConfigError  = ""
 if (Test-Path $ConfigPath) {
     try {
-        $json = Get-Content -Path $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $raw = Get-Content -Path $ConfigPath -Raw -Encoding UTF8
+        # BOM entfernen (Notepad speichert UTF-8 teils mit BOM -> ConvertFrom-Json in
+        # Windows PowerShell 5.1 wirft sonst "Invalid JSON primitive")
+        if ($raw) { $raw = $raw.TrimStart([char]0xFEFF, [char]0xFFFE) }
+        $json = $raw | ConvertFrom-Json
         foreach ($k in @($cfg.Keys)) {
             if ($json.PSObject.Properties.Name -contains $k) { $cfg[$k] = $json.$k }
         }
         $ConfigLoaded = $true
     } catch {
-        # ungueltige JSON -> mit Defaults weiterlaufen, Fehler wird spaeter geloggt
+        $ConfigError = $_.Exception.Message
     }
 }
 
@@ -183,8 +188,14 @@ function Stop-Madrix {
 
 if ($ConfigLoaded) {
     Write-Log "Konfiguration geladen: $ConfigPath"
+} elseif (Test-Path $ConfigPath) {
+    Write-Log "Konfigdatei ungueltig ($ConfigPath): $ConfigError - nutze Defaults." "WARN"
 } else {
-    Write-Log "Keine gueltige Konfigdatei ($ConfigPath) - nutze Defaults." "WARN"
+    Write-Log "Keine Konfigdatei gefunden ($ConfigPath) - nutze Defaults." "WARN"
+}
+# Fruehwarnung, wenn die EXE nicht existiert (haeufigste Fehlkonfiguration)
+if (-not (Test-Path $MadrixExe)) {
+    Write-Log "ACHTUNG: konfigurierte MadrixExe existiert nicht: $MadrixExe" "ERROR"
 }
 Write-Log "MADRIX Watchdog gestartet. EXE='$MadrixExe', Intervall=${CheckIntervalSec}s, FailThreshold=$FailThreshold, HttpCheck=$UseHttpCheck."
 
