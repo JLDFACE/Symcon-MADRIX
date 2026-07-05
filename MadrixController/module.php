@@ -27,6 +27,10 @@ class MadrixController extends IPSModule
         // Scan (Chunked)
         $this->RegisterPropertyInteger('ScanChunk', 8);
 
+        // Watchdog / Online-Erkennung
+        $this->RegisterPropertyInteger('OfflineThreshold', 3); // Fehl-Polls bis "offline"
+        $this->RegisterPropertyInteger('NotifyScriptID', 0);   // Skript, das bei Statuswechsel gerufen wird (0 = aus)
+
         $this->RegisterTimer('PollTimer', 0, 'MADRIX_Poll($_IPS[\'TARGET\']);');
         $this->RegisterTimer('ScanTimer', 0, 'MADRIX_ScanTick($_IPS[\'TARGET\']);');
 
@@ -34,6 +38,11 @@ class MadrixController extends IPSModule
         $this->RegisterAttributeInteger('MasterInstance', 0);
         $this->RegisterAttributeInteger('DeckAInstance', 0);
         $this->RegisterAttributeInteger('DeckBInstance', 0);
+
+        // Watchdog: Entprell-Zähler + gemerkter Online-Zustand ('' = unbekannt, '0' = offline, '1' = online)
+        $this->RegisterAttributeInteger('OfflineFailCount', 0);
+        $this->SetBuffer('OnlineState', '');
+        $this->SetBuffer('FailCountedThisPoll', '0');
 
         // Fast-Poll Zeitfenster
         $this->SetBuffer('FastUntil', '0');
@@ -63,6 +72,12 @@ class MadrixController extends IPSModule
 
         // Eigene Profile anlegen
         $this->EnsureProfiles();
+
+        // Status-/Watchdog-Variablen des Controllers
+        $this->RegisterVariableBoolean('Online', 'MADRIX Online', 'MADRIX.OnlineStatus', 1);
+        $this->RegisterVariableString('LastError', 'Letzter Fehler', '', 2);
+        $this->RegisterVariableInteger('LastOnlineChange', 'Status geändert', '~UnixTimestamp', 3);
+        $this->RegisterVariableInteger('OfflineCount', 'Ausfälle gesamt', '', 4);
 
     }
 
@@ -100,11 +115,18 @@ class MadrixController extends IPSModule
             IPS_SetVariableProfileAssociation('MADRIX.Switch', 0, 'Aus', '', 0);
             IPS_SetVariableProfileAssociation('MADRIX.Switch', 1, 'Ein', '', 0);
         }
+
+        if (!IPS_VariableProfileExists('MADRIX.OnlineStatus')) {
+            IPS_CreateVariableProfile('MADRIX.OnlineStatus', 0);
+        }
+        IPS_SetVariableProfileAssociation('MADRIX.OnlineStatus', true, 'Online', 'Network', 0x00BB00);
+        IPS_SetVariableProfileAssociation('MADRIX.OnlineStatus', false, 'Offline', 'Network', 0xFF4444);
     }
 
     private function CleanupLegacyVariables()
     {
-        $idents = array('Online', 'LastError', 'ScanRunning', 'ScanProgress', 'ScanInfo', 'ScanLastRun');
+        // Hinweis: 'Online' und 'LastError' sind ab sofort reguläre Statusvariablen (siehe Create) und dürfen NICHT gelöscht werden.
+        $idents = array('ScanRunning', 'ScanProgress', 'ScanInfo', 'ScanLastRun');
         foreach ($idents as $ident) {
             $vid = @$this->GetIDForIdent($ident);
             if ($vid > 0 && IPS_ObjectExists($vid)) {
@@ -753,6 +775,9 @@ class MadrixController extends IPSModule
 
     public function Poll()
     {
+        // Entprell-Guard: pro Poll-Zyklus darf der Fehlerzähler nur einmal steigen.
+        $this->SetBuffer('FailCountedThisPoll', '0');
+
         if (!$this->Lock()) {
             $this->SetFastPollForSeconds(5);
             return;
@@ -1320,11 +1345,29 @@ class MadrixController extends IPSModule
 
     private function SetOnline($online, $err)
     {
-        $this->SetValueIfChanged('Online', (bool)$online);
-
         $e = (string)$err;
+
+        $threshold = (int)$this->ReadPropertyInteger('OfflineThreshold');
+        if ($threshold < 1) $threshold = 1;
+
+        // Entprellung: bei Erfolg Zähler zurücksetzen, bei Fehler pro Poll nur EINMAL hochzählen.
+        if ($online) {
+            $this->WriteAttributeInteger('OfflineFailCount', 0);
+            $target = true;
+        } else {
+            if ((string)$this->GetBuffer('FailCountedThisPoll') !== '1') {
+                $fc = (int)$this->ReadAttributeInteger('OfflineFailCount') + 1;
+                $this->WriteAttributeInteger('OfflineFailCount', $fc);
+                $this->SetBuffer('FailCountedThisPoll', '1');
+            }
+            // Erst nach OfflineThreshold aufeinanderfolgenden Fehl-Polls als offline werten.
+            $target = ((int)$this->ReadAttributeInteger('OfflineFailCount') < $threshold);
+        }
+
+        // Fehlertext-Variable immer aktuell halten.
         $this->SetValueIfChanged('LastError', $e);
 
+        // Log-Spam vermeiden (bestehendes Verhalten): neue Fehlertexte einmalig loggen.
         $lastLogged = (string)$this->GetBuffer('LastLoggedError');
         if ($e !== $lastLogged) {
             $this->SetBuffer('LastLoggedError', $e);
@@ -1332,6 +1375,48 @@ class MadrixController extends IPSModule
                 $this->LogMessage($e, KL_WARNING);
             }
         }
+
+        // Zustandswechsel erkennen ('' = unbekannt/Init).
+        $prev = (string)$this->GetBuffer('OnlineState');
+        $targetStr = $target ? '1' : '0';
+        if ($prev === $targetStr) {
+            return;
+        }
+
+        $this->SetBuffer('OnlineState', $targetStr);
+        $this->SetValueIfChanged('Online', $target);
+        $this->SetValueIfChanged('LastOnlineChange', time());
+
+        // Beim allerersten Setzen (Init) nur den Wert übernehmen, nicht melden.
+        if ($prev === '') {
+            return;
+        }
+
+        if ($target) {
+            $this->LogMessage('MADRIX wieder erreichbar (Recovery).', KL_NOTIFY);
+            $this->Notify(true, 'MADRIX wieder erreichbar.');
+        } else {
+            $ocv = @$this->GetIDForIdent('OfflineCount');
+            if ($ocv > 0) {
+                $this->SetValue('OfflineCount', (int)GetValue($ocv) + 1);
+            }
+            $this->LogMessage('MADRIX nicht erreichbar: ' . $e, KL_WARNING);
+            $this->Notify(false, 'MADRIX nicht erreichbar: ' . $e);
+        }
+    }
+
+    private function Notify($online, $message)
+    {
+        $sid = (int)$this->ReadPropertyInteger('NotifyScriptID');
+        if ($sid <= 0 || !IPS_ObjectExists($sid)) {
+            return;
+        }
+        @IPS_RunScriptEx($sid, array(
+            'Sender'     => 'MADRIX',
+            'InstanceID' => $this->InstanceID,
+            'Online'     => (bool)$online,
+            'Message'    => (string)$message
+        ));
     }
 
     private function SetFastPollForSeconds($sec)
