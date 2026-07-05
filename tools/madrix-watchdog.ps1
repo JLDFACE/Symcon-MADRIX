@@ -2,61 +2,101 @@
     MADRIX Watchdog
     ---------------
     Ueberwacht den MADRIX-Prozess auf dem lokalen Windows-PC und startet ihn nach
-    Absturz ODER Freeze automatisch neu. Laeuft als Endlosschleife in der
-    interaktiven Desktop-Session (per Aufgabenplanung "Bei Anmeldung" starten).
+    Absturz ODER Freeze automatisch neu.
 
-    Symcon kann einen abgestuerzten Windows-Prozess NICHT aus der Ferne neu
-    starten - dieses Skript ist der lokale "Actuator". Symcon uebernimmt nur die
-    Ueberwachung/Meldung (siehe MadrixController-Modul).
+    Laeuft in der interaktiven Desktop-Session (per Aufgabenplanung "Bei Anmeldung").
+    Ein Windows-DIENST ist ungeeignet, weil MADRIX eine GUI-Anwendung ist und in
+    Session 0 (Dienste) keinen Desktop hat.
 
-    Einrichtung: siehe README.md in diesem Ordner.
+    KONFIGURATION erfolgt ueber die Datei  madrix-watchdog.config.json  im selben
+    Ordner wie dieses Skript/die EXE. Dieses Skript selbst muss NICHT editiert werden.
+
+    Kann per build-exe.ps1 (ps2exe) zu MadrixWatchdog.exe kompiliert werden.
+    Einrichtung: Install.cmd (Doppelklick). Details: README.md.
 #>
 
-# =====================================================================
-#  KONFIGURATION - hier pro Installation anpassen
-# =====================================================================
-
-# Pfad zur MADRIX-Programmdatei (anpassen an installierte Version!)
-$MadrixExe        = "C:\Program Files\MADRIX 5\madrix.exe"
-
-# Prozessname OHNE ".exe" (fuer Get-Process). Meist "madrix".
-$ProcessName      = "madrix"
-
-# HTTP-Remote der lokalen MADRIX-Instanz (optionaler, tieferer Health-Check).
-# Muss in MADRIX unter Preferences > Remote Control > HTTP aktiviert sein.
-$UseHttpCheck     = $true
-$HttpHost         = "127.0.0.1"
-$HttpPort         = 80
-$HttpUser         = ""              # Basic-Auth Benutzer (leer = keine Auth)
-$HttpPass         = ""              # Basic-Auth Passwort
-$HttpTimeoutSec   = 4
-
-# Nach einem Neustart optional ein bestimmtes Setup per HTTP laden
-# (0 = nichts laden; MADRIX sollte das Setup ohnehin per Startup-Option laden).
-$LoadSetupId      = 0
-
-# Zeitsteuerung
-$CheckIntervalSec = 15              # Pruefintervall
-$FailThreshold    = 3              # aufeinanderfolgende Fehler bis "Freeze"
-$GraceSec         = 30             # Wartezeit nach Kill/Start (verhindert Kill-Schleifen)
-$StartupWaitSec   = 60             # max. Wartezeit bis MADRIX nach Start wieder antwortet
-
-# Logdatei
-$LogFile          = Join-Path $env:ProgramData "MadrixWatchdog\madrix-watchdog.log"
-$MaxLogBytes      = 2MB            # einfache Log-Rotation
-
-# =====================================================================
-#  Ab hier keine Anpassung noetig
-# =====================================================================
-
 $ErrorActionPreference = "SilentlyContinue"
+
+# ---------------------------------------------------------------------
+#  Konfiguration laden (externe JSON-Datei; fehlende Werte -> Defaults)
+# ---------------------------------------------------------------------
+
+function Get-BaseDir {
+    if ($PSScriptRoot) { return $PSScriptRoot }
+    try {
+        $exe = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+        $dir = [System.IO.Path]::GetDirectoryName($exe)
+        if ($dir) { return $dir }
+    } catch { }
+    return (Get-Location).Path
+}
+
+$BaseDir    = Get-BaseDir
+$ConfigPath = Join-Path $BaseDir "madrix-watchdog.config.json"
+
+# Defaults (werden von der JSON ueberschrieben, falls vorhanden)
+$cfg = [ordered]@{
+    MadrixExe        = "C:\Program Files\MADRIX 5\madrix.exe"
+    ProcessName      = "madrix"
+    UseHttpCheck     = $true
+    HttpHost         = "127.0.0.1"
+    HttpPort         = 80
+    HttpUser         = ""
+    HttpPass         = ""
+    HttpTimeoutSec   = 4
+    LoadSetupId      = 0
+    CheckIntervalSec = 15
+    FailThreshold    = 3
+    GraceSec         = 30
+    StartupWaitSec   = 60
+    LogFile          = ""      # leer = %ProgramData%\MadrixWatchdog\madrix-watchdog.log
+}
+
+$ConfigLoaded = $false
+if (Test-Path $ConfigPath) {
+    try {
+        $json = Get-Content -Path $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($k in @($cfg.Keys)) {
+            if ($json.PSObject.Properties.Name -contains $k) { $cfg[$k] = $json.$k }
+        }
+        $ConfigLoaded = $true
+    } catch {
+        # ungueltige JSON -> mit Defaults weiterlaufen, Fehler wird spaeter geloggt
+    }
+}
+
+# Werte in Variablen uebernehmen
+$MadrixExe        = [string]$cfg.MadrixExe
+$ProcessName      = [string]$cfg.ProcessName
+$UseHttpCheck     = [bool]  $cfg.UseHttpCheck
+$HttpHost         = [string]$cfg.HttpHost
+$HttpPort         = [int]   $cfg.HttpPort
+$HttpUser         = [string]$cfg.HttpUser
+$HttpPass         = [string]$cfg.HttpPass
+$HttpTimeoutSec   = [int]   $cfg.HttpTimeoutSec
+$LoadSetupId      = [int]   $cfg.LoadSetupId
+$CheckIntervalSec = [int]   $cfg.CheckIntervalSec
+$FailThreshold    = [int]   $cfg.FailThreshold
+$GraceSec         = [int]   $cfg.GraceSec
+$StartupWaitSec   = [int]   $cfg.StartupWaitSec
+
+if ([string]::IsNullOrWhiteSpace($cfg.LogFile)) {
+    $LogFile = Join-Path $env:ProgramData "MadrixWatchdog\madrix-watchdog.log"
+} else {
+    $LogFile = [string]$cfg.LogFile
+}
+$MaxLogBytes = 2MB
+
+# ---------------------------------------------------------------------
+#  Hilfsfunktionen
+# ---------------------------------------------------------------------
 
 function Write-Log {
     param([string]$Message, [string]$Level = "INFO")
     $line = "{0} [{1}] {2}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Level, $Message
     try {
         $dir = Split-Path -Parent $LogFile
-        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
         if ((Test-Path $LogFile) -and ((Get-Item $LogFile).Length -gt $MaxLogBytes)) {
             Move-Item -Path $LogFile -Destination ($LogFile + ".old") -Force
         }
@@ -70,7 +110,6 @@ function Get-MadrixProcess {
 }
 
 function Invoke-MadrixHttp {
-    # Fuehrt ein RemoteCommand aus. Rueckgabe: $true bei HTTP 200, sonst $false.
     param([string]$Command)
     if (-not $UseHttpCheck) { return $true }
 
@@ -90,19 +129,12 @@ function Invoke-MadrixHttp {
 }
 
 function Test-MadrixHealthy {
-    # Liefert $true, wenn MADRIX laeuft UND (soweit geprueft) reagiert.
     param($proc)
     if ($null -eq $proc) { return $false }
-
-    # GUI-Freeze-Erkennung: reagiert das Hauptfenster noch auf Windows-Messages?
     try {
         if ($proc.MainWindowHandle -ne 0 -and -not $proc.Responding) { return $false }
     } catch { }
-
-    # Optionaler HTTP-Health-Check (harmloses GET).
-    if ($UseHttpCheck) {
-        return (Invoke-MadrixHttp -Command "GetSetupRegisterCurrentId")
-    }
+    if ($UseHttpCheck) { return (Invoke-MadrixHttp -Command "GetSetupRegisterCurrentId") }
     return $true
 }
 
@@ -114,11 +146,10 @@ function Start-Madrix {
     Write-Log "Starte MADRIX: $MadrixExe"
     Start-Process -FilePath $MadrixExe | Out-Null
 
-    # Auf Wiedererreichbarkeit warten.
     $deadline = (Get-Date).AddSeconds($StartupWaitSec)
     do {
         Start-Sleep -Seconds 3
-        $proc = Get-MadrixProcess
+        $proc  = Get-MadrixProcess
         $ready = ($null -ne $proc) -and (Invoke-MadrixHttp -Command "GetSetupRegisterCurrentId")
     } while (-not $ready -and (Get-Date) -lt $deadline)
 
@@ -150,7 +181,12 @@ function Stop-Madrix {
 #  Hauptschleife
 # ---------------------------------------------------------------------
 
-Write-Log "MADRIX Watchdog gestartet. Intervall=${CheckIntervalSec}s, FailThreshold=$FailThreshold, HttpCheck=$UseHttpCheck."
+if ($ConfigLoaded) {
+    Write-Log "Konfiguration geladen: $ConfigPath"
+} else {
+    Write-Log "Keine gueltige Konfigdatei ($ConfigPath) - nutze Defaults." "WARN"
+}
+Write-Log "MADRIX Watchdog gestartet. EXE='$MadrixExe', Intervall=${CheckIntervalSec}s, FailThreshold=$FailThreshold, HttpCheck=$UseHttpCheck."
 
 $failCount = 0
 
@@ -159,21 +195,16 @@ while ($true) {
         $proc = Get-MadrixProcess
 
         if ($null -eq $proc) {
-            # Absturz: Prozess ganz weg -> sofort neu starten.
             Write-Log "MADRIX-Prozess nicht vorhanden (Absturz erkannt)." "WARN"
             $failCount = 0
             Start-Madrix
             Start-Sleep -Seconds $GraceSec
         }
         elseif (Test-MadrixHealthy -proc $proc) {
-            # Gesund.
-            if ($failCount -gt 0) {
-                Write-Log "MADRIX reagiert wieder (nach $failCount Fehlversuch(en))."
-            }
+            if ($failCount -gt 0) { Write-Log "MADRIX reagiert wieder (nach $failCount Fehlversuch(en))." }
             $failCount = 0
         }
         else {
-            # Laeuft, reagiert aber nicht -> Freeze-Verdacht, entprellt.
             $failCount++
             Write-Log "MADRIX reagiert nicht ($failCount/$FailThreshold)." "WARN"
             if ($failCount -ge $FailThreshold) {

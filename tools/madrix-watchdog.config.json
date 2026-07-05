@@ -1,0 +1,20 @@
+{
+  "MadrixExe": "C:\\Program Files\\MADRIX 5\\madrix.exe",
+  "ProcessName": "madrix",
+
+  "UseHttpCheck": true,
+  "HttpHost": "127.0.0.1",
+  "HttpPort": 80,
+  "HttpUser": "",
+  "HttpPass": "",
+  "HttpTimeoutSec": 4,
+
+  "LoadSetupId": 0,
+
+  "CheckIntervalSec": 15,
+  "FailThreshold": 3,
+  "GraceSec": 30,
+  "StartupWaitSec": 60,
+
+  "LogFile": ""
+}
