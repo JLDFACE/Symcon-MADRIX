@@ -65,6 +65,13 @@ bleibt also extern, **kein Neu-Kompilieren** bei Änderungen.
 | `FailThreshold` | aufeinanderfolgende Fehler bis „Freeze" | `3` |
 | `GraceSec` | Wartezeit nach Kill/Start (gegen Kill-Schleifen) | `30` |
 | `StartupWaitSec` | max. Wartezeit bis MADRIX nach Start antwortet | `60` |
+| `AlertUrl` | URL für Alarm bei Neustart-Schleife, z. B. Symcon-WebHook (leer = aus) | `""` |
+| `AlertMethod` | `POST` (JSON-Body) oder `GET` (Query-Parameter) | `POST` |
+| `AlertUser` / `AlertPass` | Basic-Auth für die Alarm-URL (leer = keine) | `""` |
+| `AlertTimeoutSec` | Timeout Alarm-Request | `5` |
+| `AlertAfterFails` | Alarm nach N erfolglosen Neustarts **in Folge** | `3` |
+| `AlertRepeatMin` | Folgealarm alle N Minuten, solange die Störung anhält (0 = nur einmal) | `30` |
+| `AlertOnRecovery` | Entwarnung senden, sobald MADRIX wieder läuft | `true` |
 | `LogFile` | Logpfad (leer = `%ProgramData%\MadrixWatchdog\madrix-watchdog.log`) | `""` |
 
 ## Voraussetzungen in MADRIX / Windows
@@ -87,6 +94,31 @@ Alle `CheckIntervalSec` Sekunden:
   neu starten (entprellt gegen Kill-Restart-Schleifen).
 - Nach dem Start bis `StartupWaitSec` auf HTTP-Erreichbarkeit warten und optional
   `LoadSetupId` laden.
+- **Neustart-Schleife:** Kommt MADRIX nach einem Neustart nicht hoch (stürzt z. B.
+  beim Start immer wieder ab), zählt der Watchdog die erfolglosen Versuche und ruft
+  nach `AlertAfterFails` Fehlversuchen die `AlertUrl` auf — statt stundenlang stumm
+  weiterzustarten. Solange die Störung anhält, wird alle `AlertRepeatMin` Minuten
+  erinnert; läuft MADRIX wieder, kommt eine Entwarnung (`AlertOnRecovery`).
+
+## Alarmierung über Symcon (WebHook)
+
+In Symcon eine **WebHook-Control**-Instanz öffnen, Hook `/hook/madrix-alert` anlegen
+und auf ein Skript zeigen lassen, z. B.:
+
+```php
+<?php
+// Hook-Skript fuer /hook/madrix-alert
+$data = json_decode(file_get_contents('php://input'), true);
+$text = sprintf('[%s] MADRIX-Watchdog %s: %s (Fehlversuche: %s)',
+    $data['host'] ?? '?', $data['event'] ?? '?', $data['message'] ?? '', $data['fails'] ?? '?');
+IPS_LogMessage('MadrixWatchdog', $text);
+// Hier alarmieren, z. B.:
+// SMTP_SendMail(12345 /* SMTP-Instanz */, 'MADRIX Alarm', $text);
+// WFC_PushNotification(12345 /* WebFront */, 'MADRIX', $text, '', 0);
+```
+
+In der Watchdog-Konfig dann `"AlertUrl": "http://<symcon-ip>:3777/hook/madrix-alert"`
+eintragen. `event` ist `restart-loop` (Störung) oder `recovered` (Entwarnung).
 
 ## Manueller Test (ohne Autostart)
 

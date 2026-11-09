@@ -77,11 +77,14 @@ if ($makeNew) {
         $httpPass = Ask "  HTTP-Passwort (leer = keins)" ""
     }
     $interval = [int](Ask "Pruefintervall in Sekunden" 15)
+    $alertUrl = Ask "Alarm-URL bei Neustart-Schleife (z.B. Symcon-WebHook; leer = aus)" ""
 
     $cfg = [ordered]@{
         MadrixExe=$exe; ProcessName="madrix"; UseHttpCheck=$useHttp;
         HttpHost="127.0.0.1"; HttpPort=$httpPort; HttpUser=$httpUser; HttpPass=$httpPass; HttpTimeoutSec=4;
-        LoadSetupId=0; CheckIntervalSec=$interval; FailThreshold=3; GraceSec=30; StartupWaitSec=60; LogFile=""
+        LoadSetupId=0; CheckIntervalSec=$interval; FailThreshold=3; GraceSec=30; StartupWaitSec=60;
+        AlertUrl=$alertUrl; AlertMethod="POST"; AlertUser=""; AlertPass=""; AlertTimeoutSec=5;
+        AlertAfterFails=3; AlertRepeatMin=30; AlertOnRecovery=$true; LogFile=""
     }
     Save-Config $cfg
     Write-Host "Konfig gespeichert (ohne BOM): $cfgTarget" -ForegroundColor Green

@@ -50,6 +50,14 @@ $cfg = [ordered]@{
     GraceSec         = 30
     StartupWaitSec   = 60
     LogFile          = ""      # leer = %ProgramData%\MadrixWatchdog\madrix-watchdog.log
+    AlertUrl         = ""      # leer = Alarmierung aus (z.B. Symcon-WebHook: http://symcon:3777/hook/madrix-alert)
+    AlertMethod      = "POST"  # POST (JSON-Body) oder GET (Query-Parameter)
+    AlertUser        = ""      # Basic-Auth fuer die Alarm-URL (leer = keine)
+    AlertPass        = ""
+    AlertTimeoutSec  = 5
+    AlertAfterFails  = 3       # Alarm nach N erfolglosen Neustarts in Folge
+    AlertRepeatMin   = 30      # Folgealarm alle N Minuten, solange die Stoerung anhaelt (0 = nur einmal)
+    AlertOnRecovery  = $true   # Entwarnung senden, sobald MADRIX wieder laeuft
 }
 
 $ConfigLoaded = $false
@@ -84,6 +92,14 @@ $CheckIntervalSec = [int]   $cfg.CheckIntervalSec
 $FailThreshold    = [int]   $cfg.FailThreshold
 $GraceSec         = [int]   $cfg.GraceSec
 $StartupWaitSec   = [int]   $cfg.StartupWaitSec
+$AlertUrl         = [string]$cfg.AlertUrl
+$AlertMethod      = ([string]$cfg.AlertMethod).ToUpper()
+$AlertUser        = [string]$cfg.AlertUser
+$AlertPass        = [string]$cfg.AlertPass
+$AlertTimeoutSec  = [int]   $cfg.AlertTimeoutSec
+$AlertAfterFails  = [int]   $cfg.AlertAfterFails
+$AlertRepeatMin   = [int]   $cfg.AlertRepeatMin
+$AlertOnRecovery  = [bool]  $cfg.AlertOnRecovery
 
 if ([string]::IsNullOrWhiteSpace($cfg.LogFile)) {
     $LogFile = Join-Path $env:ProgramData "MadrixWatchdog\madrix-watchdog.log"
@@ -141,6 +157,64 @@ function Invoke-MadrixHttp {
     }
 }
 
+function Send-Alert {
+    param([string]$Event, [string]$Message)
+    if ([string]::IsNullOrWhiteSpace($AlertUrl)) { return }
+
+    $payload = [ordered]@{
+        host    = $env:COMPUTERNAME
+        event   = $Event          # "restart-loop" oder "recovered"
+        message = $Message
+        fails   = $script:RestartFails
+        time    = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+    }
+    $headers = @{}
+    if ($AlertUser -ne "") {
+        $pair = "{0}:{1}" -f $AlertUser, $AlertPass
+        $headers["Authorization"] = "Basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($pair))
+    }
+    try {
+        if ($AlertMethod -eq "GET") {
+            $qs  = ($payload.GetEnumerator() | ForEach-Object {
+                       "{0}={1}" -f $_.Key, [uri]::EscapeDataString([string]$_.Value)
+                   }) -join "&"
+            $sep = if ($AlertUrl.Contains("?")) { "&" } else { "?" }
+            Invoke-WebRequest -Uri ($AlertUrl + $sep + $qs) -Headers $headers `
+                -TimeoutSec $AlertTimeoutSec -UseBasicParsing | Out-Null
+        } else {
+            $body = $payload | ConvertTo-Json -Compress
+            Invoke-WebRequest -Uri $AlertUrl -Method Post -Body $body `
+                -ContentType "application/json; charset=utf-8" -Headers $headers `
+                -TimeoutSec $AlertTimeoutSec -UseBasicParsing | Out-Null
+        }
+        Write-Log "Alarm gesendet ($Event): $Message"
+    } catch {
+        Write-Log "Alarm konnte nicht gesendet werden ($AlertUrl): $($_.Exception.Message)" "ERROR"
+    }
+}
+
+# Bewertet das Ergebnis eines Neustartversuchs und loest ggf. Alarm/Entwarnung aus.
+function Register-RestartOutcome {
+    param([bool]$Success)
+    if ($Success) {
+        if ($script:AlertActive -and $AlertOnRecovery) {
+            Send-Alert "recovered" ("MADRIX laeuft wieder (nach {0} erfolglosen Neustarts)." -f $script:RestartFails)
+        }
+        $script:RestartFails = 0
+        $script:AlertActive  = $false
+        return
+    }
+    $script:RestartFails++
+    Write-Log "Neustart nicht bestaetigt ($($script:RestartFails). Versuch in Folge)." "WARN"
+    $repeatDue = ($AlertRepeatMin -gt 0) -and
+                 (((Get-Date) - $script:LastAlertTime).TotalMinutes -ge $AlertRepeatMin)
+    if ($script:RestartFails -ge $AlertAfterFails -and (-not $script:AlertActive -or $repeatDue)) {
+        Send-Alert "restart-loop" ("MADRIX kommt trotz {0} Neustartversuchen nicht hoch - manueller Eingriff noetig." -f $script:RestartFails)
+        $script:AlertActive   = $true
+        $script:LastAlertTime = Get-Date
+    }
+}
+
 function Test-MadrixHealthy {
     param($proc)
     if ($null -eq $proc) { return $false }
@@ -152,6 +226,7 @@ function Test-MadrixHealthy {
 }
 
 function Start-Madrix {
+    $script:StartupConfirmed = $false
     if (-not (Test-Path $MadrixExe)) {
         Write-Log "MADRIX-EXE nicht gefunden: $MadrixExe" "ERROR"
         return
@@ -166,7 +241,15 @@ function Start-Madrix {
         $ready = ($null -ne $proc) -and (Invoke-MadrixHttp -Command "GetSetupRegisterCurrentId")
     } while (-not $ready -and (Get-Date) -lt $deadline)
 
+    # Ohne HTTP-Check zaehlt oben nur "Prozess existiert" - kurz warten und pruefen,
+    # ob er den Start ueberlebt (erkennt Absturzschleifen direkt beim Hochfahren).
+    if ($ready -and -not $UseHttpCheck) {
+        Start-Sleep -Seconds ([Math]::Min($GraceSec, 20))
+        $ready = ($null -ne (Get-MadrixProcess))
+    }
+
     if ($ready) {
+        $script:StartupConfirmed = $true
         Write-Log "MADRIX ist wieder erreichbar (Recovery bestaetigt)."
         if ($LoadSetupId -gt 0) {
             if (Invoke-MadrixHttp -Command ("SetSetupRegisterLoadById={0}" -f $LoadSetupId)) {
@@ -212,9 +295,14 @@ if (-not (Test-Path $MadrixExe)) {
         Write-Log "ACHTUNG: keine MADRIX.exe gefunden - bitte MadrixExe in der Konfig setzen." "ERROR"
     }
 }
-Write-Log "MADRIX Watchdog gestartet. EXE='$MadrixExe', Intervall=${CheckIntervalSec}s, FailThreshold=$FailThreshold, HttpCheck=$UseHttpCheck."
+$AlertInfo = if ([string]::IsNullOrWhiteSpace($AlertUrl)) { "aus" } else { "$AlertUrl (nach $AlertAfterFails Fehlversuchen)" }
+Write-Log "MADRIX Watchdog gestartet. EXE='$MadrixExe', Intervall=${CheckIntervalSec}s, FailThreshold=$FailThreshold, HttpCheck=$UseHttpCheck, Alarm=$AlertInfo."
 
-$failCount = 0
+$failCount               = 0
+$script:RestartFails     = 0      # erfolglose Neustarts in Folge
+$script:AlertActive      = $false
+$script:LastAlertTime    = [datetime]::MinValue
+$script:StartupConfirmed = $false
 
 while ($true) {
     try {
@@ -224,11 +312,14 @@ while ($true) {
             Write-Log "MADRIX-Prozess nicht vorhanden (Absturz erkannt)." "WARN"
             $failCount = 0
             Start-Madrix
+            Register-RestartOutcome -Success $script:StartupConfirmed
             Start-Sleep -Seconds $GraceSec
         }
         elseif (Test-MadrixHealthy -proc $proc) {
             if ($failCount -gt 0) { Write-Log "MADRIX reagiert wieder (nach $failCount Fehlversuch(en))." }
             $failCount = 0
+            # MADRIX kam evtl. spaeter als StartupWaitSec hoch -> Entwarnung nachreichen
+            if ($script:RestartFails -gt 0) { Register-RestartOutcome -Success $true }
         }
         else {
             $failCount++
@@ -237,6 +328,7 @@ while ($true) {
                 Stop-Madrix -proc $proc
                 Start-Sleep -Seconds $GraceSec
                 Start-Madrix
+                Register-RestartOutcome -Success $script:StartupConfirmed
                 $failCount = 0
                 Start-Sleep -Seconds $GraceSec
             }

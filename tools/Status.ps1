@@ -54,6 +54,11 @@ if (Test-Path $Cfg) {
         Line "UseHttpCheck:" $c.UseHttpCheck
         if ($c.UseHttpCheck) { Line "HTTP:" ("{0}:{1}" -f $c.HttpHost, $c.HttpPort) }
         Line "Intervall/Threshold:" ("{0}s / {1}" -f $c.CheckIntervalSec, $c.FailThreshold)
+        if ($c.AlertUrl) {
+            Line "Alarmierung:" ("{0} (nach {1} erfolglosen Neustarts)" -f $c.AlertUrl, $c.AlertAfterFails)
+        } else {
+            Line "Alarmierung:" "aus" "Yellow"
+        }
     } catch {
         Line "Konfig:" "UNGUELTIG ($($_.Exception.Message))" "Red"
     }

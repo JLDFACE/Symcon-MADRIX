@@ -16,5 +16,14 @@
   "GraceSec": 30,
   "StartupWaitSec": 60,
 
+  "AlertUrl": "",
+  "AlertMethod": "POST",
+  "AlertUser": "",
+  "AlertPass": "",
+  "AlertTimeoutSec": 5,
+  "AlertAfterFails": 3,
+  "AlertRepeatMin": 30,
+  "AlertOnRecovery": true,
+
   "LogFile": ""
 }
